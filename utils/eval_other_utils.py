@@ -883,6 +883,13 @@ def post_process(output, answer, dataset_config, eval_metadata=None):
     Returns:
         Tuple of (metrics_dict, additional_info_dict)
     """
+    if str(dataset_config.get("dataset", "")).lower() == "omnimemeval":
+        if (eval_metadata or {}).get("benchmark") == "personamem_v2":
+            from evaluation.omnimemeval.scoring import extract_choice_answer
+            correct, parsed = extract_choice_answer(output["output"], str(answer))
+            return {"omni_choice_accuracy": float(correct)}, {"parsed_output": parsed}
+        values, info = default_post_process(output, answer)
+        return {"memorydata_aux_" + key: value for key, value in values.items()}, info
     sub_dataset_name = str(dataset_config.get('sub_dataset', '') or '').strip().lower()
     
     # Route to appropriate post-processing based on dataset type

@@ -1,7 +1,7 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>面向记忆增强 Agent 的统一基准测试套件</b></p>
-  <p><i>"一套流水线。四大基准族。二十二种方法预设。一致的执行接口。"</i></p>
+  <p><i>"一套流水线。原有四大基准族，加上 OmniMemEval 五个基准。二十二种方法预设。"</i></p>
 </div>
 
 <div align="center">
@@ -9,6 +9,7 @@
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
   [![Methods](https://img.shields.io/badge/Methods-22%20Presets-7C3AED?style=flat-square)]()
   [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
+  [![OmniMemEval](https://img.shields.io/badge/OmniMemEval-5%20Benchmarks-F97316?style=flat-square)](docs/omnimemeval_zh.md)
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
 
@@ -58,6 +59,46 @@
 
 **MemoryData 正是为填补这一空白而生。** 它是一个面向研究的基准测试套件，将四大基准族（MemoryAgentBench、LoCoMo、LongBench、MemBench）、二十二种方法预设以及共享的运行时统一到一个 `main.py` 启动器之下，使异构的记忆范式能够在一致的执行接口和稳定的产物布局下进行比较。
 
+本次新增 `memorydata_omnimemeval_v1`，接入 OmniMemEval（`a5c8b4b`）中的 **LoCoMo、LongMemEval、PersonaMem v2、HaluMem、BEAM**。继续使用原有入口和方法配置，在 MemoryData 执行流程下保留各基准评分规则，不宣称复现 OmniMemEval 的公开分数。
+
+## OmniMemEval 使用方法
+
+完整说明见 [中文使用指南](docs/omnimemeval_zh.md)、[英文接入说明](docs/omnimemeval.md)、[本次变更汇总](docs/omnimemeval_changes.md) 和 [验证记录](docs/omnimemeval_validation.md)。原有基准配置继续使用。
+
+| 基准 | `benchmark/omnimemeval/config/` 下的小样本配置 | 默认完整配置 | 主指标 |
+| --- | --- | --- | --- |
+| LoCoMo 原始数据，类别 1–4 | `locomo_smoke.yaml` | `locomo_default.yaml` | 按类别的 Judge Accuracy |
+| LongMemEval S | `longmemeval_smoke.yaml` | `longmemeval_s.yaml` | 按题型的 Judge Accuracy |
+| PersonaMem v2，benchmark/32K | `personamem_v2_smoke.yaml` | `personamem_v2_32k.yaml` | 按偏好类型的选项 Accuracy |
+| HaluMem Medium | `halumem_smoke.yaml` | `halumem_medium.yaml` | 按类型、难度的 QA Judge Accuracy |
+| BEAM 100k | `beam_smoke.yaml` | `beam_100k.yaml` | Rubric Nugget / 事件排序分数 |
+
+先通过 `scripts/prepare_omnimemeval.ps1` 准备相邻仓库的 `OmniMemEval/data`，或在数据集 YAML 中覆盖 `data_root`。Python 3.11 环境安装本次所需的 `requirements-omnimemeval.txt`。辅助脚本默认采用当前工作区的 Windows 路径，其他机器需要调整，具体步骤见中文指南。
+
+在 Windows PowerShell 中进入项目：
+
+```powershell
+cd 'E:\LLM judge\MemoryData'
+```
+
+仍然通过两个 YAML 选择方法和数据集：
+
+```powershell
+& 'D:\conda\envs\memorydata\python.exe' main.py --agent_config config/reference_long_context_agent.yaml --dataset_config benchmark/omnimemeval/config/locomo_smoke.yaml --artifact_root results/omni_runs
+```
+
+更换 `--dataset_config` 即可切换上述五个基准；将方法配置改为 `config/reference_embedding_rag.yaml` 或 `config/sequential_mem0.yaml` 可运行 Embedding RAG、Mem0。小样本配置摄取首个有效单元的完整历史，最多回答 3 题，LongMemEval 为 1 题。完整配置取消样本和问题数量限制。旧版 LoCoMo 600 题子集和 MemoryAgentBench 中的 LongMemEval 子集与新配置分开保留。
+
+得到回答后，用 `main.py` 打印的实际结果路径运行专用评分：
+
+```powershell
+& 'D:\conda\envs\memorydata\python.exe' -m evaluation.omnimemeval.evaluate '替换为实际的benchmark_results.json路径' --judge_config evaluation/omnimemeval/config/qwen3_8b.yaml
+```
+
+评分另存为 `.omnimemeval_scores.json`，不覆盖回答。相同配置再次运行会恢复兼容的回答和评分；数据与配置指纹隔离状态。PersonaMem 评分不调用裁判模型。Agent YAML 中的回答、嵌入服务及上述 Judge 服务必须已启动，可以是本机或远程的 OpenAI 兼容服务；接入脚本没有下载模型权重或部署推理服务。
+
+**验证现状：** 23 项离线测试通过，含 Long Context、Embedding RAG、Mem0 × 五基准的 15 个模拟 HTTP 组合；默认数据全部解析通过，共 750 个单元、10,907 题。真实模型验收仍受 9908、9909、9009 端口没有服务阻塞，模拟分数不代表模型效果。其余 19 个方法预设仅检查了模板兼容性。
+
 
 ## 📚 特性
 
@@ -80,8 +121,8 @@
 <tr>
 <td>
 
-**📊 4 大基准族**
-MemoryAgentBench、LoCoMo、LongBench 和 MemBench，各自提供完整版配置以及按类别/切片的细分配置，开箱即用。
+**📊 原有基准 + OmniMemEval**
+保留 MemoryAgentBench、LoCoMo、LongBench、MemBench，新增 OmniMemEval 五基准、独立评分和逐单元加载执行。
 
 </td>
 <td>
@@ -196,9 +237,14 @@ project-root/
 │   ├── memoryagentbench/          # MemoryAgentBench 加载器与基准配置
 │   ├── locomo/                    # LoCoMo 配置与 JSON 加载器
 │   ├── longbench/                 # LongBench 按比例采样子集支持
-│   └── membench/                  # MemBench 各切片配置与加载器
+│   ├── membench/                  # MemBench 各切片配置与加载器
+│   └── omnimemeval/               # 五基准加载器、模板、逐单元运行与 17 个配置
 ├── evaluation/
-│   └── longmemeval/               # 保留的 LongMemEval 外挂评测辅助代码
+│   ├── longmemeval/               # 保留的 LongMemEval 外挂评测辅助代码
+│   └── omnimemeval/               # 独立 Judge / rubric 评分与上游来源说明
+├── docs/                          # 中英文接入指南、变更汇总、验证记录
+├── scripts/                       # OmniMemEval 环境、数据准备与验证脚本
+├── tests/                         # 离线加载、评分、接口与集成测试
 ├── methods/                        # 按论文分类组织的方法运行时
 │   ├── embedding_rag/              # 稠密检索参考基线
 │   ├── memagent/  mem0/  memochat/ # 序列上下文架构
@@ -206,6 +252,7 @@ project-root/
 │   └── a_mem/  everos/  letta/  lightmem/  memorag/  memoryos/  self_rag/  simplemem/  MemOS/ # 多范式混合架构
 ├── utils/                          # 共享运行时工具，包括长上下文与 BM25 参考路径
 ├── requirements.txt               # Linux/macOS 依赖清单
+├── requirements-omnimemeval.txt   # 接入及三种验收方法所需的依赖
 └── requirements-windows.txt       # Windows 依赖清单
 ```
 
