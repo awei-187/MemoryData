@@ -31,8 +31,17 @@ CACHE_FILES = ("tree.json", "graph.json", "index.json", "appearance_count.json")
 
 
 def format_turn(doc):
+    """``Date: <timestamp>`` header like the release's round loader.
+
+    GraphitiExtractor._reference_time looks for ``\\bYYYY-MM-DD\\b``; in an ISO
+    timestamp the date is followed by ``T``, which defeats the word boundary and
+    silently falls back to 2000-01-01, so that ``T`` becomes a space.
+    """
     text = str(doc["text"])
-    return f"Date: {doc['date']}\n{text}" if doc.get("date") else text
+    if not doc.get("date"):
+        return text
+    date = re.sub(r"^(\d{4}-\d{1,2}-\d{1,2})T", r"\1 ", str(doc["date"]))
+    return f"Date: {date}\n{text}"
 
 
 def leaf_positions(chunk_ids):

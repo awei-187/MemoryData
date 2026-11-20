@@ -80,6 +80,17 @@ class RememService:
         self.sessions = None
 
     def _import_native(self):
+        # Upstream get_logger() opens one file per module named like
+        # "remem->utils->config_utils.log" ('>' is invalid on Windows) under the
+        # source tree. It skips that whenever a handler already exists up the
+        # logger hierarchy, so a root stderr handler routes all messages to
+        # worker.log instead; LOG_DIR keeps its makedirs out of the source tree.
+        import logging
+
+        os.environ["LOG_DIR"] = str(Path.cwd() / "remem_logs")
+        if not logging.getLogger().handlers:
+            logging.basicConfig(level=logging.INFO, stream=sys.stderr,
+                                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         sys.path.insert(0, str(self.source_dir / "src"))
         from remem.agent.strategies import flexible_tools_strategy as flexible
         from remem.embedding_model.openai_embedding_client import CacheOpenAIEmbeddingModel

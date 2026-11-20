@@ -27,7 +27,7 @@ TsmAdapter ──JSON lines（stdin/stdout）──> methods/tsm/tsm_worker.py
 ## 数据流
 
 1. 写入：chunk 去掉 `LOCOMO_META` 包装后追加到 `documents.jsonl`；来源 ID 和时间戳记在 `tsm_state.json`。不调用模型。
-2. `save()`：每个 chunk 成为一个 TSM "turn"，格式为 `Date: <时间戳>\n<文本>`（上游按轮读取数据时生成同样的 `Date:` 头）。worker 依次调用上游 `parallel_build_extract`（Graphiti 抽取 → 聚类建树和 snapshots → FAISS 索引）和 `build_retriever`。完成后检查缓存文件、snapshots、稠密检索器都已生成，才把清单标为 `ready`。
+2. `save()`：每个 chunk 成为一个 TSM "turn"，格式为 `Date: <时间戳>\n<文本>`（上游按轮读取数据时生成同样的 `Date:` 头）。ISO 时间戳里日期与时间之间的 `T` 换成空格：上游用 `\bYYYY-MM-DD\b` 提取事件时间，`2024-01-01T10:00` 中日期后紧跟 `T` 不构成单词边界，会悄悄落到 2000-01-01 的兜底值（已在真实环境中验证）。worker 依次调用上游 `parallel_build_extract`（Graphiti 抽取 → 聚类建树和 snapshots → FAISS 索引）和 `build_retriever`。完成后检查缓存文件、snapshots、稠密检索器都已生成，才把清单标为 `ready`。
 3. 恢复：按上游 `main_time.run_pipeline` 的缓存分支，读取 `tree.json`、`graph.json`、`index.json`、`appearance_count.json`、`text_edge_mapping.json` 重建检索器。上游在这条路径上不传预建索引，会**重新嵌入整棵树**，因此每次恢复都有少量嵌入费用。
 4. 查询：调用 `Retriever.query(question, **retriever_kwargs, question_date=…)`。worker 包装了 `_format_results_with_summaries`，额外记录被格式化的叶子 ID（`leaf_<i>` 对应第 i 个 chunk）；返回文本不变。
 5. 回答：
@@ -60,7 +60,7 @@ TsmAdapter ──JSON lines（stdin/stdout）──> methods/tsm/tsm_worker.py
 
 ## 使用
 
-建环境（尚未创建，需要确认后执行）：
+TSM 环境已于 2026-11-20 创建（Python 3.11，graphiti-core 0.19.0、neo4j 5.28.1、spacy 3.8.4、faiss-cpu 1.9.0.post1、openai 2.24.0、numpy 1.26.4，`pip check` 无冲突）。在其他机器上重建：
 
 ```powershell
 C:\Users\wjp\anaconda3\Scripts\conda.exe create -y -p D:\conda\envs\tsm python=3.11
@@ -70,7 +70,7 @@ C:\Users\wjp\anaconda3\Scripts\conda.exe create -y -p D:\conda\envs\tsm python=3
 D:\conda\envs\tsm\python.exe -m pip install -r methods/tsm/requirements-tsm.txt
 ```
 
-spaCy 英文模型需要单独下载（上游优先 `en_core_web_lg`，约 400 MB；其次 `en_core_web_sm`，约 12 MB）。不装模型时上游退回空白管线，时间约束解析能力变弱。
+spaCy 英文模型需要单独下载（上游优先 `en_core_web_lg`，约 400 MB；其次 `en_core_web_sm`，约 12 MB），**目前未安装**：已在真实环境中确认上游此时退回空白管线（`spacy.blank("en")`），时间约束解析能力变弱。
 
 运行：
 
@@ -80,7 +80,7 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_ts
 
 ## 与原方法的差异和缺口
 
-- **未在真实环境验证**：TSM 环境、spaCy 模型和 Neo4j 连接都还没有准备，worker 与上游函数的对接只按源码编写，离线测试用的是替身。首次真实运行前需要一次小规模冒烟测试（会产生 API 费用）。
+- **尚未做真实 API 运行**：环境已建好，并已在真实环境中打开 worker，确认配置结构被上游 `extract_config_bundle` 接受，`parallel_build_extract`、`build_retriever`、`_format_results_with_summaries`、`clear_group_data`、`build_graph` 的签名与预期一致，未调用模型，也未连接 Neo4j。构建和查询需要真实 LLM、嵌入和 Neo4j，只用替身测过；spaCy 模型未安装，Neo4j 密码尚未配置。首次真实运行前需要一次小规模冒烟测试（会产生 API 费用）。
 - **实现来源**：见上文，非论文确认的官方代码，版本 0.1.1，作者自述未做真实 API 基准运行。
 - 只用用户消息：上游 TSM 配置 `use_user_only: true`，只用用户发言构图和生成 persona。MemoryData 的 chunk 是多说话人混合文本，无法可靠拆出"用户"，因此关闭该选项、使用整个 chunk。
 - 粒度：上游一个叶子是一轮（用户 + 助手）；这里一个叶子是一个 MemoryData chunk（`agent_chunk_size` 4096 token），更粗。需要更接近原设置时可减小 `agent_chunk_size`。

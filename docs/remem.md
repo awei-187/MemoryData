@@ -39,6 +39,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
 - 每个 chunk 变成单条消息的 session：`[{"content": "<时间戳>\n<文本>", "memorydata_doc": "md-doc-…"}]`。上游把消息字典原样存为 verbatim 节点的元数据，因此可以由节点追溯到 chunk。
 - 上游 `chunk_by_session` 在消息没有 `date` 字段时会抛 `KeyError`。worker 用一个等价的切分函数替换它：每个 session 一个 chunk，内容与上游单日期 session 的格式一致（日期在首行），只是不加 `role:` 前缀，因为 MemoryData chunk 里已经带有说话人。
 - 包装 `FlexibleToolsStrategy._format_result`，在 logs 里额外记录智能体访问过的节点名。检索和回答行为不变。
+- 日志：上游 `get_logger` 为每个模块在源码树下打开一个名如 `remem->utils->config_utils.log` 的文件，`>` 在 Windows 文件名中非法，导入即报错。上游在日志器层级上已有处理器时会跳过建文件，因此 worker 在导入前给根日志器配置 stderr 处理器（输出进入 `worker.log`），并把 `LOG_DIR` 指向 context 目录，不改上游代码。
 
 ## 来源追踪
 
@@ -64,7 +65,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
 
 ## 使用
 
-先建 REMem 环境（尚未创建，需要确认后执行）：
+REMem 环境已于 2026-11-20 创建（Python 3.11，torch 2.6.0、numpy 1.26.4、openai 1.109.1、python-igraph 0.11.8、bm25s 0.3.16，`pip check` 无冲突）。在其他机器上重建：
 
 ```powershell
 C:\Users\wjp\anaconda3\Scripts\conda.exe create -y -p D:\conda\envs\remem python=3.11
@@ -82,7 +83,7 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_re
 
 ## 与原方法的差异和缺口
 
-- **未在真实环境验证**：REMem 环境尚未创建，worker 与上游 API 的对接只按源码编写，离线测试用的是替身。首次真实运行前需要一次小规模冒烟测试（会产生 API 费用）。
+- **尚未做真实 API 运行**：环境已建好，并已在真实环境中以不可达的假地址打开 worker，确认上游类、方法签名、存储接口、DSPy 提示文件、切分函数替换和观察包装都与预期一致，未调用任何模型。`index` 和 `query` 需要真实 LLM 与嵌入调用，只用替身测过；首次真实运行前需要一次小规模冒烟测试（会产生 API 费用）。
 - 模型：论文默认 GPT-4.1-mini + NV-Embed-v2（4096 维，本地 GPU）。这里按统一配置使用 gpt-4o-mini + text-embedding-3-small。上游代码本身支持这两个模型（gpt-4o-mini 也是上游 `BaseConfig` 的默认值），但结果不能视为论文设置的复现。
 - 输入粒度：上游 LoCoMo 脚本按原始 session 传入带说话人和日期的消息列表；这里每个 MemoryData chunk（`agent_chunk_size` 4096 token）是一个 session，说话人留在文本里。本分支的 chunk 一般没有单独的时间戳字段，日期只出现在正文里（如 LoCoMo 的 session 标题），由 REMem 的抽取 LLM 从文本中读取；只有带 `timestamp` 的结构化 chunk 才会在首行加日期。
 - 只支持整批建索引：所有 chunk 写完后在 `save()` 中一次 `index()`。上游在图已存在时会跳过索引，没有增量接口，因此 HaluMem 式"边写入边提问"（`prepare_for_queries`）未实现。要支持，需要在每批提问前用累积文档完整重建，代价很高。

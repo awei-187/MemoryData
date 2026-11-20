@@ -177,7 +177,9 @@ class WorkerGlueTests(unittest.TestCase):
 
     def test_turn_format_and_leaf_positions(self):
         self.assertEqual(self.worker.format_turn({"text": "Alice: hi", "date": "2023-05-08T13:56:00"}),
-                         "Date: 2023-05-08T13:56:00\nAlice: hi")
+                         "Date: 2023-05-08 13:56:00\nAlice: hi")
+        self.assertEqual(self.worker.format_turn({"text": "x", "date": "2023/05/20 (Sat) 02:21"}),
+                         "Date: 2023/05/20 (Sat) 02:21\nx")
         self.assertEqual(self.worker.format_turn({"text": "x", "date": None}), "x")
         self.assertEqual(self.worker.leaf_positions({"a": ["leaf_3", "topic_1", "leaf_0"], "b": ["leaf_3"]}), [3, 0])
 
