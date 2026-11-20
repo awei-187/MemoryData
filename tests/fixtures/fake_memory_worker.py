@@ -38,6 +38,11 @@ def handle(op, args):
         if KIND == "tsm" and not os.environ.get("NEO4J_PASSWORD"):
             raise RuntimeError("Neo4j password missing")
         STATE.update(args)
+        if os.environ.get("FAKE_MP_CHILD"):
+            # Like TSM's Timer: an mp.Manager server process that inherits the cwd.
+            import multiprocessing
+            STATE["manager"] = multiprocessing.Manager()
+            STATE["times"] = STATE["manager"].dict()
         log("open", docs=len(args.get("docs") or []))
         return {"opened": True}
     if op in {"index", "reopen"}:

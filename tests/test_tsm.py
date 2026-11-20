@@ -188,6 +188,16 @@ class WorkerGlueTests(unittest.TestCase):
         self.assertEqual(build(uuid="fixed", name="chunk_0", content="x"), {"name": "chunk_0", "content": "x"})
         self.assertTrue(build._memorydata_compat)
 
+    def test_reasoning_shim_only_for_non_reasoning_models(self):
+        build = self.worker.client_without_reasoning(lambda **kwargs: kwargs)
+        config = type("Config", (), {"model": "gpt-4o-mini"})()
+        self.assertEqual(build(config=config, cache=False),
+                         {"config": config, "cache": False, "reasoning": None, "verbosity": None})
+        config.model = "openai/gpt-5-mini"
+        self.assertEqual(build(config=config, cache=False), {"config": config, "cache": False})
+        self.assertFalse(self.worker.is_reasoning_model("gpt-4.1-nano"))
+        self.assertTrue(self.worker.is_reasoning_model("o3-mini"))
+
     def test_query_passes_question_date_and_reports_observed_leaves(self):
         service = self.worker.TsmService(source_dir=ROOT)
         received = {}

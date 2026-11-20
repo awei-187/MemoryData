@@ -131,6 +131,18 @@ class WorkerProcess:
             raise WorkerError(f"Worker {op!r} failed: {reply.get('error')}\n{self._log_tail()}")
         return reply.get("result")
 
+    def _kill_tree(self):
+        """Force-stop the worker together with any processes it started."""
+        if os.name == "nt":
+            # Children do not die with their parent on Windows; /T walks the tree.
+            try:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if self.process.poll() is None:
+            self.process.kill()
+
     def close(self, kill=False):
         if self.closed:
             return
@@ -140,10 +152,13 @@ class WorkerProcess:
             if not kill:
                 try:
                     self.call("shutdown", timeout=30)
+                    # The worker stops its own child processes before exiting;
+                    # killing it right after the reply would orphan them.
+                    self.process.wait(timeout=30)
                 except Exception:
                     kill = True
-            if kill or self.process.poll() is None:
-                self.process.kill()
+            if kill and self.process.poll() is None:
+                self._kill_tree()
             try:
                 self.process.wait(timeout=30)
             except subprocess.TimeoutExpired:

@@ -43,6 +43,27 @@ def serve(handler):
     # Native libraries may leave non-daemon threads that block interpreter
     # shutdown; a lingering worker would keep its context folder locked (cwd)
     # and its database connections open. Every reply is already flushed.
+    stop_child_processes()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(0)
+
+
+def stop_child_processes(timeout=5.0):
+    """os._exit skips multiprocessing's exit hooks, so stop its children first.
+
+    TSM's Timer starts an mp.Manager server (and build_tree an mp.Pool); with
+    the spawn start method they inherit the worker's working directory and
+    would outlive it, keeping the context folder locked on Windows.
+    """
+    multiprocessing = sys.modules.get("multiprocessing")
+    if multiprocessing is None:
+        return
+    children = multiprocessing.active_children()
+    for child in children:
+        child.terminate()
+    for child in children:
+        child.join(timeout)
+        if child.is_alive():
+            child.kill()
+            child.join(timeout)

@@ -285,6 +285,17 @@ class WorkerProcessTests(unittest.TestCase):
             close_all_workers()
             self.assertIsNotNone(pid_holder.wait(timeout=30))
             os.rmdir(Path(directory) / "b")  # its working directory is released
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ, OPENAI_API_KEY=SECRET, OPENAI_BASE_URL="http://offline.invalid/v1",
+                       FAKE_WORKER_KIND="remem", FAKE_MP_CHILD="1")
+            # multiprocessing children (TSM's mp.Manager) inherit the cwd; neither a
+            # clean shutdown nor a forced kill may leave them holding it.
+            for name, kill in (("clean", False), ("killed", True)):
+                cwd = Path(directory) / name
+                worker = WorkerProcess(sys.executable, FAKE_WORKER, cwd=cwd, env=env, log_dir=directory, timeout=60)
+                worker.call("open", docs=[])
+                worker.close(kill=kill)
+                shutil.rmtree(cwd)
         with self.assertRaisesRegex(FileNotFoundError, "conda environment"):
             WorkerProcess("", FAKE_WORKER, cwd=".", env={}, log_dir=".")
         with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):

@@ -66,6 +66,28 @@ def episode_without_uuid(factory):
     return build
 
 
+REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def is_reasoning_model(model):
+    name = str(model or "").strip().lower().rsplit("/", 1)[-1]
+    return name.startswith(REASONING_MODEL_PREFIXES)
+
+
+def client_without_reasoning(factory):
+    """Wrap an OpenAIClient constructor: no reasoning/verbosity for non-reasoning models."""
+
+    def build(*args, **kwargs):
+        config = kwargs.get("config", args[0] if args else None)
+        if not is_reasoning_model(getattr(config, "model", None)):
+            kwargs.setdefault("reasoning", None)
+            kwargs.setdefault("verbosity", None)
+        return factory(*args, **kwargs)
+
+    build._memorydata_compat = True
+    return build
+
+
 class TsmService:
     def __init__(self, source_dir=None):
         self.source_dir = Path(source_dir or os.environ.get("TSM_SOURCE_DIR") or DEFAULT_SOURCE).resolve()
@@ -91,6 +113,7 @@ class TsmService:
                 retriever_class._memorydata_observed = True
             self._graphiti_config_compat()
             self._graphiti_episode_compat()
+            self._graphiti_reasoning_compat()
             self.main = main_time
         return self.main
 
@@ -134,6 +157,24 @@ class TsmService:
         if "get_by_uuid(" not in inspect.getsource(Graphiti.add_episode_bulk):
             return
         graphiti_extractor.RawEpisode = episode_without_uuid(factory)
+
+    @staticmethod
+    def _graphiti_reasoning_compat():
+        """graphiti-core 0.19.0's OpenAIClient defaults to reasoning='minimal' and
+        verbosity='low' (GPT-5 parameters) on every structured call, and the
+        release builds it with OpenAIClient(config=..., cache=False). Models
+        such as gpt-4o-mini (the release's own default) reject those with 400.
+        For non-reasoning models pass None, so the same model is used without them."""
+        import inspect
+
+        import graphiti_extractor
+
+        factory = graphiti_extractor.OpenAIClient
+        if getattr(factory, "_memorydata_compat", False):
+            return
+        if not {"reasoning", "verbosity"} <= set(inspect.signature(factory.__init__).parameters):
+            return
+        graphiti_extractor.OpenAIClient = client_without_reasoning(factory)
 
     def open(self, args):
         main = self._import_native()
