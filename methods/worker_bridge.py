@@ -5,8 +5,11 @@ environment (for example REMem needs openai<2 and numpy<2, TSM pins
 graphiti-core). Like the Hindsight REST adapter, MemoryData then talks to the
 native code through a narrow protocol instead of importing it:
 
-* the worker is started as ``<python> -I -u <worker script>`` with the method's
-  own interpreter, so neither PYTHONPATH nor the script directory leaks in;
+* the worker is started as ``<python> -I -X utf8 -u <worker script>`` with the
+  method's own interpreter, so neither PYTHONPATH nor the script directory leaks
+  in; ``-I`` also ignores PYTHONIOENCODING, so UTF-8 mode is requested with
+  ``-X utf8`` (otherwise Windows pipes use the ANSI code page and native
+  ``print`` of characters such as "✅" raises UnicodeEncodeError);
 * credentials reach the worker only through its environment, never through
   arguments, requests, manifests or logs written by MemoryData;
 * each request is one JSON line ``{"id", "op", "args"}`` and each reply one JSON
@@ -83,7 +86,7 @@ class WorkerProcess:
         self._next_id = 0
         self._replies = queue.Queue()
         self.process = subprocess.Popen(
-            [python, "-I", "-u", str(script)],
+            [python, "-I", "-X", "utf8", "-u", str(script)],
             cwd=str(cwd), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self._log, bufsize=0,
         )

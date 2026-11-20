@@ -264,7 +264,9 @@ class WorkerProcessTests(unittest.TestCase):
                     worker.call("explode")
             finally:
                 worker.close()
-            self.assertIn("native noise", (Path(directory) / "worker.log").read_text(encoding="utf-8"))
+            # -I ignores PYTHONIOENCODING; -X utf8 keeps non-ANSI output from crashing the worker.
+            self.assertIn("native noise on stdout must not break the protocol ✅ 中文",
+                          (Path(directory) / "worker.log").read_text(encoding="utf-8"))
             self.assertNotIn(SECRET, (Path(directory) / "worker.log").read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, OPENAI_API_KEY=SECRET, OPENAI_BASE_URL="http://offline.invalid/v1",
@@ -276,7 +278,7 @@ class WorkerProcessTests(unittest.TestCase):
             orphan.process.stdin.close()
             self.assertEqual(orphan.process.wait(timeout=30), 0)
             orphan.close()
-            self.assertIn(f"worker pid {orphan.process.pid}", (Path(directory) / "worker.log").read_text())
+            self.assertIn(f"worker pid {orphan.process.pid}", (Path(directory) / "worker.log").read_text(encoding="utf-8"))
             # A worker nobody references any more is still stopped by close_all_workers (atexit).
             pid_holder = WorkerProcess(sys.executable, FAKE_WORKER, cwd=Path(directory) / "b", env=env,
                                        log_dir=directory, timeout=60).process

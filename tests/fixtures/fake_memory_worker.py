@@ -31,7 +31,7 @@ def group_file():
 
 
 def handle(op, args):
-    print("native noise on stdout must not break the protocol")
+    print("native noise on stdout must not break the protocol ✅ 中文")
     if op == "open":
         if not os.environ.get("OPENAI_API_KEY") or not os.environ.get("OPENAI_BASE_URL"):
             raise RuntimeError("credentials were not passed through the environment")
