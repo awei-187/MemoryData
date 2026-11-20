@@ -88,3 +88,14 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_ts
 - 问题日期：上游对 LoCoMo 以"最后一个 session 的次日"作为问题日期；MemoryData 只在数据集提供 `question_date` 时传入（MemoryAgentBench 的 LongMemEval 有，LoCoMo 没有），没有时检索器退回"全局最新 snapshot"。
 - 只支持整批构建；HaluMem 式交错提问（`prepare_for_queries`）未实现。上游的增量更新需要重新聚类和重建 snapshots，代价与完整重建相近。
 - 恢复时重新嵌入整棵树（上游行为），见上文。
+
+## 真实 API 冒烟测试（2026-11-20，未通过）
+
+数据与 REMem 冒烟相同（MemoryAgentBench `longmemeval_s*` 首个样本，前 3 个 chunk，2 题），Neo4j 为本机 2026.09 企业版，spaCy 模型未安装。三次尝试都停在 Graphiti 抽取的第一步，**没有产生任何模型调用**，Neo4j 中没有写入数据。发现的都是发布版代码与其自身固定依赖 `graphiti-core==0.19.0`（`REPRODUCIBILITY.md` 所列）之间的不兼容：
+
+1. `GraphitiExtractor._initialize_graphiti` 调用 `LLMConfig(..., request_timeout=...)`，而 0.19.0 的 `LLMConfig` 没有这个参数，直接 `TypeError`。已在 worker 中加兼容垫片：参数不被支持时接收并丢弃，代价是 Graphiti 改用 OpenAI SDK 的默认请求超时，而不是发布版设想的 120 秒。
+2. `extract_graph_compatible` 给每个 `RawEpisode` 传入固定的 `uuid`（`uuid5`），而 0.19.0 的 `add_episode_bulk` 把带 uuid 的 episode 当作"已存在、按 uuid 读出"，在新分组上必然 `NodeNotFoundError`。**此问题尚未处理。** 发布版读图时按 `chunk_<i>` 名称取回库中的 uuid，不依赖传入值，因此去掉 uuid 在功能上等价，但会失去重复写入的幂等性；之后的聚类、snapshots、稠密索引和查询从未在真实环境中运行过，可能还有其他不兼容。
+
+结论：TSM 发布版 0.1.1 按发布状态无法完成构建（与其 README"未做真实 API 基准运行"的自述一致）。是否继续用兼容垫片推进，需要另行决定。
+
+另外，第一次失败时暴露了桥接代码的两个问题，已修复并加了离线测试：存活 worker 登记表原为弱引用，`main.py` 因异常退出时 worker 可能已被回收而得不到关闭；worker 在协议循环结束后可能被上游留下的非守护线程卡住、不退出。现在登记表持强引用，worker 在循环结束后强制退出，并在 `worker.log` 首行记录 PID。修复前遗留的一个 worker 进程仍占用 `results/tsm_smoke_20261120/.../native` 目录，该目录暂时无法删除。

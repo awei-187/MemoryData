@@ -78,8 +78,31 @@ class TsmService:
 
                 retriever_class._format_results_with_summaries = observed
                 retriever_class._memorydata_observed = True
+            self._graphiti_config_compat()
             self.main = main_time
         return self.main
+
+    @staticmethod
+    def _graphiti_config_compat():
+        """The release passes LLMConfig(request_timeout=...), which its own pin
+        graphiti-core==0.19.0 does not accept (TypeError before any extraction).
+        Accept and drop that one argument; Graphiti then keeps the OpenAI SDK's
+        default request timeout instead of the release's 120 s."""
+        import inspect
+
+        import graphiti_extractor
+
+        base = graphiti_extractor.LLMConfig
+        if "request_timeout" in inspect.signature(base.__init__).parameters or getattr(base, "_memorydata_compat", False):
+            return
+
+        class LLMConfigCompat(base):
+            _memorydata_compat = True
+
+            def __init__(self, *args, request_timeout=None, **kwargs):
+                super().__init__(*args, **kwargs)
+
+        graphiti_extractor.LLMConfig = LLMConfigCompat
 
     def open(self, args):
         main = self._import_native()

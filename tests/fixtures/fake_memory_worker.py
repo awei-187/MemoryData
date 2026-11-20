@@ -77,4 +77,8 @@ def handle(op, args):
 
 
 if __name__ == "__main__":
+    if os.environ.get("FAKE_HANG_THREAD"):
+        # Like native libraries that leave a non-daemon thread behind.
+        import threading
+        threading.Thread(target=threading.Event().wait).start()
     sys.exit(protocol.serve(handle))

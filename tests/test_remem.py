@@ -266,6 +266,25 @@ class WorkerProcessTests(unittest.TestCase):
                 worker.close()
             self.assertIn("native noise", (Path(directory) / "worker.log").read_text(encoding="utf-8"))
             self.assertNotIn(SECRET, (Path(directory) / "worker.log").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ, OPENAI_API_KEY=SECRET, OPENAI_BASE_URL="http://offline.invalid/v1",
+                       FAKE_WORKER_KIND="remem", FAKE_HANG_THREAD="1")
+            # A crashed parent: stdin closes, a native non-daemon thread lingers.
+            orphan = WorkerProcess(sys.executable, FAKE_WORKER, cwd=Path(directory) / "a", env=env,
+                                   log_dir=directory, timeout=60)
+            orphan.call("open", docs=[])
+            orphan.process.stdin.close()
+            self.assertEqual(orphan.process.wait(timeout=30), 0)
+            orphan.close()
+            self.assertIn(f"worker pid {orphan.process.pid}", (Path(directory) / "worker.log").read_text())
+            # A worker nobody references any more is still stopped by close_all_workers (atexit).
+            pid_holder = WorkerProcess(sys.executable, FAKE_WORKER, cwd=Path(directory) / "b", env=env,
+                                       log_dir=directory, timeout=60).process
+            import gc
+            gc.collect()
+            close_all_workers()
+            self.assertIsNotNone(pid_holder.wait(timeout=30))
+            os.rmdir(Path(directory) / "b")  # its working directory is released
         with self.assertRaisesRegex(FileNotFoundError, "conda environment"):
             WorkerProcess("", FAKE_WORKER, cwd=".", env={}, log_dir=".")
         with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):

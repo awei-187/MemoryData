@@ -24,11 +24,12 @@ import queue
 import shutil
 import subprocess
 import threading
-import weakref
 from pathlib import Path
 
 LOG_FILE = "worker.log"
-_LIVE_WORKERS = weakref.WeakSet()
+# Strong references: after a crash the adapter may already be garbage when
+# atexit runs, and a weakly held worker would never be stopped.
+_LIVE_WORKERS = set()
 
 
 def close_all_workers():
@@ -89,6 +90,8 @@ class WorkerProcess:
         self._reader = threading.Thread(target=self._read_replies, daemon=True)
         self._reader.start()
         _LIVE_WORKERS.add(self)
+        self._log.write(f"[memorydata] worker pid {self.process.pid} started: {script}\n".encode("utf-8"))
+        self._log.flush()
 
     def _read_replies(self):
         for raw in iter(self.process.stdout.readline, b""):

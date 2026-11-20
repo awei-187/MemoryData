@@ -40,3 +40,9 @@ def serve(handler):
         protocol.flush()
         if op == "shutdown":
             break
+    # Native libraries may leave non-daemon threads that block interpreter
+    # shutdown; a lingering worker would keep its context folder locked (cwd)
+    # and its database connections open. Every reply is already flushed.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
