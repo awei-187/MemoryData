@@ -41,6 +41,17 @@ BUILD_DEFAULTS = {
 }
 
 
+def graphiti_concurrency(agent_config):
+    """Graphiti's SEMAPHORE_LIMIT (default 20; nested gathers can exceed it).
+    Throughput only, so it is not part of the identity fingerprint."""
+    value = agent_config.get("tsm_graphiti_concurrency")
+    if value in (None, ""):
+        return None
+    if int(value) <= 0:
+        raise ValueError("tsm_graphiti_concurrency must be a positive integer")
+    return int(value)
+
+
 def neo4j_settings(agent_config):
     return {
         "uri": str(agent_config.get("tsm_neo4j_uri") or "bolt://localhost:7687"),
@@ -119,6 +130,7 @@ class TsmAdapter(BufferedWorkerAdapter):
         self.top_k = int(agent_config.get("retrieve_num", 20))
         self.answer_mode = str(agent_config.get("tsm_answer_mode", "memorydata"))
         self.timeout = float(agent_config.get("tsm_worker_timeout_seconds", 7200))
+        self.concurrency = graphiti_concurrency(agent_config)
         if self.answer_mode not in ANSWER_MODES or self.top_k <= 0 or self.timeout <= 0:
             raise ValueError("tsm_answer_mode must be memorydata or native; retrieve_num and timeout must be positive")
         dataset = {k: v for k, v in dataset_config.items() if k != "max_test_queries"}
@@ -148,6 +160,8 @@ class TsmAdapter(BufferedWorkerAdapter):
                     "NEO4J_DATABASE": self.neo4j["database"], "NEO4J_PASSWORD": password,
                     "TSM_LLM_BASE_URL": env["OPENAI_BASE_URL"],
                     "TSM_EMBEDDING_BASE_URL": env["MEMORYDATA_EMBEDDING_BASE_URL"]})
+        if self.concurrency is not None:
+            env["SEMAPHORE_LIMIT"] = str(self.concurrency)
         return WorkerProcess(python, WORKER_SCRIPT, cwd=self.native_dir, log_dir=self.state_dir,
                              env=env, timeout=self.timeout)
 
@@ -217,6 +231,7 @@ class TsmAdapter(BufferedWorkerAdapter):
         if (adapter.neo4j["uri"], adapter.neo4j["database"]) != (state.get("neo4j_uri"), state.get("neo4j_database")):
             raise ValueError("TSM Neo4j endpoint changed; reset with the old endpoint or use a new --artifact_root")
         adapter.timeout = float(agent_config.get("tsm_worker_timeout_seconds", 7200))
+        adapter.concurrency = graphiti_concurrency(agent_config)
         adapter.state = state
         adapter.worker = None
         adapter.worker_factory = adapter.start_worker

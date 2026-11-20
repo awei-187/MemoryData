@@ -161,9 +161,21 @@ class AdapterTests(unittest.TestCase):
             adapter.start_worker()
         for change, message in (({"tsm_native_config": {"use_user_only": True}}, "Unsupported"),
                                 ({"tsm_answer_mode": "other"}, "answer_mode"),
-                                ({"embedding_model": ""}, "embedding model")):
+                                ({"embedding_model": ""}, "embedding model"),
+                                ({"tsm_graphiti_concurrency": 0}, "concurrency")):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, message):
                 self.adapter(dict(self.config, **change))
+
+    def test_graphiti_concurrency_reaches_only_the_worker_environment(self):
+        started = []
+        fake_process = lambda python, script, **kwargs: started.append(kwargs["env"])
+        env = {"NEO4J_PASSWORD": "pw", "OPENAI_API_KEY": SECRET, "OPENAI_BASE_URL": "http://offline.invalid/v1"}
+        with patch.dict(os.environ, env), patch("methods.tsm.tsm_adapter.WorkerProcess", fake_process):
+            os.environ.pop("SEMAPHORE_LIMIT", None)  # restored by patch.dict
+            self.adapter(dict(self.config, tsm_graphiti_concurrency=4)).start_worker()
+            self.adapter().start_worker()
+        self.assertEqual(started[0]["SEMAPHORE_LIMIT"], "4")
+        self.assertNotIn("SEMAPHORE_LIMIT", started[1])
 
     def test_evidence_split_handles_summary_only_results(self):
         self.assertEqual(split_evidence("only summaries", []), ([], "only summaries"))

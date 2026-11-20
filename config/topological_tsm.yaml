@@ -33,6 +33,9 @@ tsm_neo4j_uri: bolt://localhost:7687
 tsm_neo4j_user: neo4j
 tsm_neo4j_database: neo4j
 tsm_neo4j_password_env: NEO4J_PASSWORD
+# Graphiti's concurrent model calls (SEMAPHORE_LIMIT, default 20). About 40 parallel
+# long extraction requests timed out on the shared relay; a lower cap only slows the build.
+tsm_graphiti_concurrency: 4
 # Overrides of the release config (cluster, entity_clustering, retriever_kwargs,
 # llm_max_tokens); defaults follow configs/locomo/tsm.yaml.
 tsm_native_config: {}
