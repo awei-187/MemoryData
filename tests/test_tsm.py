@@ -183,6 +183,11 @@ class WorkerGlueTests(unittest.TestCase):
         self.assertEqual(self.worker.format_turn({"text": "x", "date": None}), "x")
         self.assertEqual(self.worker.leaf_positions({"a": ["leaf_3", "topic_1", "leaf_0"], "b": ["leaf_3"]}), [3, 0])
 
+    def test_episode_shim_drops_only_the_uuid(self):
+        build = self.worker.episode_without_uuid(lambda **kwargs: kwargs)
+        self.assertEqual(build(uuid="fixed", name="chunk_0", content="x"), {"name": "chunk_0", "content": "x"})
+        self.assertTrue(build._memorydata_compat)
+
     def test_query_passes_question_date_and_reports_observed_leaves(self):
         service = self.worker.TsmService(source_dir=ROOT)
         received = {}

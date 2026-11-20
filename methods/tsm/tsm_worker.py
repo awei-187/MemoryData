@@ -55,6 +55,17 @@ def leaf_positions(chunk_ids):
     return list(dict.fromkeys(positions))
 
 
+def episode_without_uuid(factory):
+    """Wrap an episode constructor so a caller-supplied uuid is ignored."""
+
+    def build(*args, **kwargs):
+        kwargs.pop("uuid", None)
+        return factory(*args, **kwargs)
+
+    build._memorydata_compat = True
+    return build
+
+
 class TsmService:
     def __init__(self, source_dir=None):
         self.source_dir = Path(source_dir or os.environ.get("TSM_SOURCE_DIR") or DEFAULT_SOURCE).resolve()
@@ -79,6 +90,7 @@ class TsmService:
                 retriever_class._format_results_with_summaries = observed
                 retriever_class._memorydata_observed = True
             self._graphiti_config_compat()
+            self._graphiti_episode_compat()
             self.main = main_time
         return self.main
 
@@ -103,6 +115,25 @@ class TsmService:
                 super().__init__(*args, **kwargs)
 
         graphiti_extractor.LLMConfig = LLMConfigCompat
+
+    @staticmethod
+    def _graphiti_episode_compat():
+        """The release builds RawEpisode(uuid=<stable uuid5>, ...), but graphiti-core
+        0.19.0's add_episode_bulk treats a given uuid as an existing episode and
+        loads it (NodeNotFoundError in a new group). Drop the uuid so Graphiti
+        creates the episode; _read_compatible_graph reads uuids back by the name
+        chunk_<i>, so only the release's idempotent re-insert is lost."""
+        import inspect
+
+        import graphiti_extractor
+        from graphiti_core import Graphiti
+
+        factory = graphiti_extractor.RawEpisode
+        if getattr(factory, "_memorydata_compat", False):
+            return
+        if "get_by_uuid(" not in inspect.getsource(Graphiti.add_episode_bulk):
+            return
+        graphiti_extractor.RawEpisode = episode_without_uuid(factory)
 
     def open(self, args):
         main = self._import_native()
