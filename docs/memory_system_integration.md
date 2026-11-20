@@ -66,3 +66,16 @@ main.py
 6. `tests/test_<方法>.py`：假后端，不调用真实模型；`docs/<方法>.md`：说明协议、与原方法的差异和缺口。
 
 对共享文件（`utils/agent.py`、`utils/initialization.py` 等）只做最小增量修改，方法逻辑尽量放在新增文件中，以减少与其他分支的合并冲突。
+
+## 5. 依赖冲突时：独立环境 + 子进程桥接（REMem、TSM 采用）
+
+当方法的依赖与 memorydata 环境冲突、又没有现成的服务端时（REMem 要求 openai<2、numpy<2、torch；TSM 要求 graphiti-core 0.19 和 Neo4j），沿用 Hindsight "外部进程、窄接口"的思路，但不自建 HTTP 服务，而是用子进程：
+
+| 文件 | 作用 |
+| --- | --- |
+| `methods/worker_bridge.py` | 父进程侧：`WorkerProcess`（`<python> -I -u worker.py`，JSON lines 请求/应答，超时，stderr 写 `worker.log`）、`worker_environment`（只经环境变量传密钥）、`close_all_workers`（新 context 开始和 `--force` 前关闭旧进程，Windows 下运行中的进程会锁住工作目录）、`BufferedWorkerAdapter`（状态清单、身份指纹、文档缓冲、未完成写入整体重建） |
+| `methods/worker_protocol.py` | 子进程侧，仅用标准库：保留原 stdout 作协议通道，把文件描述符 1 重定向到 stderr，防止原生代码的 `print` 破坏协议 |
+| `methods/worker_agent_support.py` | `AgentWrapper` 的初始化、写入、检索和回答逻辑，`utils/agent.py` 里只加分派 |
+| `methods/<方法>/<方法>_worker.py` | 在方法自己的环境中运行，导入未修改的上游代码；胶水代码集中于此 |
+
+worker 脚本在 `-I` 模式下按文件路径加载 `worker_protocol.py`，不把 `methods/` 放进 `sys.path`，否则 `methods/remem` 会遮蔽上游的 `remem` 包。离线测试（`tests/test_remem.py`、`tests/test_tsm.py`）用 `tests/fixtures/fake_memory_worker.py` 以同一协议跑真实子进程，覆盖 `main.py` 全流程、复用、`--force`、密钥不落盘和来源追踪。各方法的细节与缺口见 [REMem 接入](remem.md) 和 [TSM 接入](tsm.md)。

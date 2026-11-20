@@ -38,6 +38,10 @@ A_MEM_CHECKPOINT_INTERVAL = 5
 # MAIN WORKFLOW FUNCTIONS (in typical execution order)
 # ============================================================================
 
+# Memory methods that run behind a worker in their own environment (methods/worker_bridge.py).
+WORKER_MEMORY_METHODS = ("remem", "tsm")
+
+
 def setup_configs_and_directories(command_line_args):
     """
     Setup configurations, handle ablations, cleanup, and create output directories.
@@ -290,6 +294,9 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
     if "hindsight" in str(agent_config.get("agent_name", "")).lower():
         from methods.hindsight.hindsight_adapter import fingerprint
         effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    if any(method in str(agent_config.get("agent_name", "")) for method in WORKER_MEMORY_METHODS):
+        from methods.worker_bridge import fingerprint as worker_fingerprint
+        effective_agent_config["_memory_history_fingerprint"] = worker_fingerprint(context_chunks)
     if backfill_longmemeval_recall_debug:
         effective_agent_config["_backfill_longmemeval_recall_debug"] = True
     mem0_checkpoint = None
@@ -320,6 +327,9 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
                             current_context_index)
                 agent.hindsight.resume_completed_ingestion(expected_documents)
                 should_load_existing_agent = True
+    if any(method in agent_name for method in WORKER_MEMORY_METHODS):
+        # REMem/TSM: reuse only a state whose manifest says the full history was indexed.
+        should_load_existing_agent = bool(agent.worker_memory.state.get("ready")) and not force_rebuild
     if "letta" in agent_name:
         letta_agent_id_path = os.path.join(agent_save_folder, "agent_id.txt")
         if "api" in agent_name:
@@ -486,6 +496,16 @@ def _reset_external_persistent_state(agent_config, dataset_config, agent_save_fo
         from methods.hindsight import HindsightAdapter
         HindsightAdapter.reset_saved(agent_config, agent_save_folder)
 
+    if any(method in agent_name for method in WORKER_MEMORY_METHODS):
+        # A live worker keeps its context folder open (locked on Windows).
+        from methods.worker_bridge import close_all_workers
+        close_all_workers()
+
+    if "tsm" in agent_name:
+        # REMem keeps everything in the local folder; TSM also owns a Neo4j group.
+        from methods.tsm import TsmAdapter
+        TsmAdapter.reset_saved(agent_config, dataset_config, agent_save_folder)
+
     if "letta" in agent_name and "api" in agent_name:
         _reset_letta_api_agent(agent_config, agent_save_folder)
 
@@ -623,7 +643,7 @@ def _apply_chunk_size_ablation(command_line_args, agent_config, dataset_config):
     new_chunk_size = command_line_args.chunk_size_ablation
     
     # Check if this is a memory agent that uses agent_chunk_size
-    if any(agent_name in agent_config['agent_name'] for agent_name in ['mem0', 'hindsight', 'letta', 'cognee', 'memtree', 'memochat', 'memoryos', 'zep', 'simplemem', 'lightmem', 'a_mem', 'everos', 'MemOS']):
+    if any(agent_name in agent_config['agent_name'] for agent_name in ['mem0', 'hindsight', 'remem', 'tsm', 'letta', 'cognee', 'memtree', 'memochat', 'memoryos', 'zep', 'simplemem', 'lightmem', 'a_mem', 'everos', 'MemOS']):
         agent_config['agent_chunk_size'] = new_chunk_size
         dataset_config['chunk_size'] = new_chunk_size
         print(f"\n\nUsing agent chunk_size: {agent_config['agent_chunk_size']}\n\n")
@@ -765,7 +785,7 @@ def _generate_output_name_tag(agent_config, dataset_config):
             f"chunk{safe_get(agent_config, 'agent_chunk_size')}",
             f"mode{safe_get(agent_config, 'letta_mode')}"
         ]
-    elif any(agent_type in agent_name for agent_type in ["mem0", "hindsight", "cognee", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "MemOS"]):
+    elif any(agent_type in agent_name for agent_type in ["mem0", "hindsight", "remem", "tsm", "cognee", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "MemOS"]):
         agent_components = [
             f"k{_resolve_retrieve_component(agent_config, agent_name)}",
             f"chunk{_resolve_agent_chunk_component(agent_config, dataset_config)}"

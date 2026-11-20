@@ -20,7 +20,7 @@ class SharedModelTests(unittest.TestCase):
 
     def test_every_preset_uses_shared_remote_models_and_no_local_model_endpoint(self):
         configs = self.configs()
-        self.assertEqual(len(configs), 23)
+        self.assertEqual(len(configs), 25)  # + REMem, TSM
         for name, config in configs:
             with self.subTest(preset=name):
                 resolved = resolve_model_config(config, {})
@@ -52,11 +52,13 @@ class SharedModelTests(unittest.TestCase):
                 self.assertEqual(resolved, resolve_model_config(resolved, env))
                 self.assertEqual(resolved["model"], "test-chat")
                 self.assertFalse(resolved["model_api_trust_env"])
-                for alias in ("zep_local_small_model", "zep_local_answer_model", "hindsight_llm_model"):
+                for alias in ("zep_local_small_model", "zep_local_answer_model", "hindsight_llm_model",
+                              "remem_llm_model", "tsm_llm_model"):
                     if alias in resolved:
                         self.assertEqual(resolved[alias], "test-chat")
                 for alias in ("text_embedding", "mem0_embedder_model", "embedder_model",
-                              "a_mem_embedding_model", "lightmem_embedding_model", "hindsight_embeddings_model"):
+                              "a_mem_embedding_model", "lightmem_embedding_model", "hindsight_embeddings_model",
+                              "remem_embedding_model", "tsm_embedding_model"):
                     if alias in resolved:
                         self.assertEqual(resolved[alias], "test-embedding")
                 for alias in ("a_mem_base_url", "simplemem_base_url", "lightmem_base_url", "zep_local_answer_base_url"):

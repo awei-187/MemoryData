@@ -53,7 +53,8 @@ def resolve_model_config(config, environment=None):
             raise ValueError("Answer model is empty")
         resolved["model"] = model
         for alias in ("zep_local_small_model", "zep_local_answer_model",
-                      "memtree_aggregate_model", "hindsight_llm_model"):
+                      "memtree_aggregate_model", "hindsight_llm_model",
+                      "remem_llm_model", "tsm_llm_model"):
             if alias in config:
                 resolved[alias] = model
     embedding_variable = config.get("embedding_model_env")
@@ -64,7 +65,8 @@ def resolve_model_config(config, environment=None):
         resolved["embedding_model"] = embedding
         for alias in ("text_embedding", "mem0_embedder_model", "embedder_model",
                       "lightmem_embedding_model", "a_mem_embedding_model",
-                      "memtree_embedding_model", "hindsight_embeddings_model"):
+                      "memtree_embedding_model", "hindsight_embeddings_model",
+                      "remem_embedding_model", "tsm_embedding_model"):
             if alias in config:
                 resolved[alias] = embedding
     dimension_variable = config.get("embedding_dim_env")
@@ -73,7 +75,8 @@ def resolve_model_config(config, environment=None):
         if dimensions <= 0:
             raise ValueError("Embedding dimensions must be positive")
         resolved["embedding_dim"] = dimensions
-        for alias in ("lightmem_embedding_dims", "hindsight_embeddings_dimensions"):
+        for alias in ("lightmem_embedding_dims", "hindsight_embeddings_dimensions",
+                      "tsm_embedding_dimensions"):
             if alias in config:
                 resolved[alias] = dimensions
     trust_variable = config.get("model_api_trust_env_env")

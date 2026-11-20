@@ -14,6 +14,8 @@ logger.setLevel(logging.INFO)
 
 MEMORY_AGENT_NAME_HINTS = (
     "hindsight",
+    "remem",
+    "tsm",
     "mem0",
     "letta",
     "cognee",

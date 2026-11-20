@@ -260,6 +260,8 @@ BASE_TEMPLATES = {
 # "Agentic_memory_self_rag" and "Structure_rag_mem0" contain the substring "rag".
 AGENT_TYPE_MAPPING = [
     ("hindsight", "agentic_memory_agent"),
+    ("remem", "agentic_memory_agent"),
+    ("tsm", "agentic_memory_agent"),
     ("Long_context_agent", "long_context_agent"),
     ("Agentic_memory", "agentic_memory_agent"),
     ("letta", "agentic_memory_agent"),

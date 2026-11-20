@@ -13,6 +13,7 @@ from benchmark.memoryagentbench.prompts.benchmark_templates import get_template
 from benchmark.memoryagentbench.loader import format_chat
 import re
 import time
+from methods import worker_agent_support
 from utils.locomo_utils import (
     dedupe_preserve_order,
     parse_locomo_metadata,
@@ -217,6 +218,8 @@ class AgentWrapper:
             self._initialize_mem0_agent(agent_config, dataset_config)
         elif self._is_agent_type("hindsight"):
             self._initialize_hindsight_agent(agent_config, dataset_config)
+        elif worker_agent_support.worker_method(self):
+            worker_agent_support.initialize(self, agent_config, dataset_config, worker_agent_support.worker_method(self))
         elif self._is_agent_type("simplemem"):
             self._initialize_simplemem_agent(agent_config, dataset_config)
         elif self._is_agent_type("lightmem"):
@@ -518,6 +521,8 @@ class AgentWrapper:
             self._is_agent_type("cognee"),
             self._is_agent_type("mem0"),
             self._is_agent_type("hindsight"),
+            self._is_agent_type("remem"),
+            self._is_agent_type("tsm"),
             self._is_agent_type("memoryos"),
             self._is_agent_type("simplemem"),
             self._is_agent_type("lightmem"),
@@ -2424,12 +2429,14 @@ class AgentWrapper:
 
         if self._is_agent_type("hindsight") and memorizing:
             self._hindsight_chunk_timestamp = message.get("timestamp") if isinstance(message, dict) else None
+        if memorizing and worker_agent_support.worker_method(self):
+            worker_agent_support.remember_timestamp(self, message)
         message = self._normalize_message_payload(message, memorizing=memorizing)
 
         # Route to appropriate agent handler based on agent type
         if 'Long_context_agent' in self.agent_name:
             return self._handle_long_context_agent(message, memorizing)
-        elif any(self._is_agent_type(agent_type) for agent_type in ["letta", "cognee", "mem0", "hindsight", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "memagent", "MemOS"]):
+        elif any(self._is_agent_type(agent_type) for agent_type in ["letta", "cognee", "mem0", "hindsight", "remem", "tsm", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "memagent", "MemOS"]):
             return self._handle_memory_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("rag"):
             return self._handle_rag_agent(message, memorizing, query_id, context_id)
@@ -2658,6 +2665,8 @@ class AgentWrapper:
             return self._handle_mem0_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("hindsight"):
             return self._handle_hindsight_agent(message, memorizing, query_id, context_id)
+        elif worker_agent_support.worker_method(self):
+            return worker_agent_support.handle(self, message, memorizing, query_id, context_id)
         elif self._is_agent_type("memtree"):
             return self._handle_memtree_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("memochat"):
@@ -4416,6 +4425,9 @@ class AgentWrapper:
         if self._is_agent_type("hindsight"):
             self.hindsight.save()
             return
+        if worker_agent_support.worker_method(self):
+            self.worker_memory.save()
+            return
         # Currently only implemented for Letta agents
         if not self._is_agent_type("letta") and not self._is_agent_type("mem0") and not self._is_agent_type("cognee") and not self._is_agent_type("memtree") and not self._is_agent_type("memochat") and not self._is_agent_type("memoryos") and not self._is_agent_type("zep") and not self._is_agent_type("simplemem") and not self._is_agent_type("lightmem") and not self._is_agent_type("a_mem") and not self._is_agent_type("everos") and not self._is_agent_type("MemOS"):
             print("\n\n Agent not saved (not implemented for this agent type) \n\n")
@@ -4523,6 +4535,9 @@ class AgentWrapper:
         """Load agent state from disk."""
         if self._is_agent_type("hindsight"):
             self.hindsight.load()
+            return
+        if worker_agent_support.worker_method(self):
+            self.worker_memory.load()
             return
         agent_save_folder = self.agent_save_to_folder
         assert os.path.exists(agent_save_folder), f"Folder {agent_save_folder} does not exist."

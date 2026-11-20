@@ -1,0 +1,53 @@
+# TSM (Findings of ACL 2026) builds its temporal knowledge graph (Graphiti on
+# Neo4j), monthly topic/persona snapshots and dense index in its own conda
+# environment (methods/tsm/tsm_worker.py); by default MemoryData's answer model
+# answers from TSM's retrieved chunks and snapshot summaries.
+agent_name: Agentic_memory_tsm
+model: gpt-4o-mini
+model_env: OPENAI_MODEL
+temperature: 0.7
+input_length_limit: 30000
+buffer_length: 1000
+model_context_window: 32768
+output_dir: ./results/outputs/api/topological_tsm
+provider: openai_compatible
+api_key_env: OPENAI_API_KEY
+base_url:
+base_url_env: OPENAI_BASE_URL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+tokenizer_encoding: o200k_base
+agent_chunk_size: 4096
+# Caps retrieved chunks; matches the release's max_chunk_setting.
+retrieve_num: 20
+
+# Interpreter of the separate TSM environment; TSM_PYTHON overrides it.
+tsm_python: D:/conda/envs/tsm/python.exe
+tsm_python_env: TSM_PYTHON
+tsm_worker_timeout_seconds: 7200
+# memorydata: MemoryData answer model + shared templates (default);
+# native: the release's QA_prompt_mirix_improved with the question date.
+tsm_answer_mode: memorydata
+# Neo4j for Graphiti; the password is read from the variable named here (.env).
+tsm_neo4j_uri: bolt://localhost:7687
+tsm_neo4j_user: neo4j
+tsm_neo4j_database: neo4j
+tsm_neo4j_password_env: NEO4J_PASSWORD
+# Overrides of the release config (cluster, entity_clustering, retriever_kwargs,
+# llm_max_tokens); defaults follow configs/locomo/tsm.yaml.
+tsm_native_config: {}
+# Resolved from OPENAI_MODEL / OPENAI_EMBEDDING_MODEL / OPENAI_EMBEDDING_DIMENSIONS.
+tsm_llm_model: gpt-4o-mini
+tsm_embedding_model: text-embedding-3-small
+tsm_embedding_dimensions: 1536
+agent_variant_tag: api-models-v1-tsm-release-0.1.1
+
+api_only: true
+embedding_model: text-embedding-3-small
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_api_key_env: OPENAI_API_KEY
+embedding_base_url:
+embedding_base_url_env: OPENAI_BASE_URL
