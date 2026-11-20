@@ -83,10 +83,30 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_re
 
 ## 与原方法的差异和缺口
 
-- **尚未做真实 API 运行**：环境已建好，并已在真实环境中以不可达的假地址打开 worker，确认上游类、方法签名、存储接口、DSPy 提示文件、切分函数替换和观察包装都与预期一致，未调用任何模型。`index` 和 `query` 需要真实 LLM 与嵌入调用，只用替身测过；首次真实运行前需要一次小规模冒烟测试（会产生 API 费用）。
+- **只做过截断历史的冒烟测试**，见下文"真实 API 冒烟测试"，不能代表完整评测分数。
 - 模型：论文默认 GPT-4.1-mini + NV-Embed-v2（4096 维，本地 GPU）。这里按统一配置使用 gpt-4o-mini + text-embedding-3-small。上游代码本身支持这两个模型（gpt-4o-mini 也是上游 `BaseConfig` 的默认值），但结果不能视为论文设置的复现。
 - 输入粒度：上游 LoCoMo 脚本按原始 session 传入带说话人和日期的消息列表；这里每个 MemoryData chunk（`agent_chunk_size` 4096 token）是一个 session，说话人留在文本里。本分支的 chunk 一般没有单独的时间戳字段，日期只出现在正文里（如 LoCoMo 的 session 标题），由 REMem 的抽取 LLM 从文本中读取；只有带 `timestamp` 的结构化 chunk 才会在首行加日期。
 - 只支持整批建索引：所有 chunk 写完后在 `save()` 中一次 `index()`。上游在图已存在时会跳过索引，没有增量接口，因此 HaluMem 式"边写入边提问"（`prepare_for_queries`）未实现。要支持，需要在每批提问前用累积文档完整重建，代价很高。
 - 只接入论文方法 `episodic_gist` + 智能体；`openie`、`temporal` 等变体和 REMem-S 单步变体未接入（可通过 `agent_fixed_tools` 近似 REMem-S，但未验证）。
 - 上游 `semantic_retrieve` 会对事实文本调用 `eval()`。这是上游行为，在记忆内容来自可信基准数据时风险有限，接入其他数据时需要注意。
 - 中断的写入不续传：未到 `ready` 的状态在下次运行时整体丢弃重建。
+
+## 真实 API 冒烟测试（2026-11-20）
+
+只检查真实链路能否走通，不是评测结果。数据为 MemoryAgentBench Accurate_Retrieval 的 `longmemeval_s*` 首个样本，`smoke_max_history_chunks: 3`（88 个 chunk 只取前 3 个），提 2 题；模型为 gpt-4o-mini 和 text-embedding-3-small，结果在 `results/remem_smoke_20261120`（Git 忽略）。
+
+| 检查项 | 结果 |
+| --- | --- |
+| 索引 | 3 个 chunk 抽出 43 个 gist、67 条事实、72 个实体，图 185 个节点、2624 条边，约 86 秒 |
+| 智能体检索 | 每题 3 步，依次调用 `semantic_retrieve`、`find_entity_contexts`、`find_gist_contexts` 等；问题日期生效（日志中时间过滤为 `2023-01-01 to 2023-05-27`） |
+| 默认回答（memorydata） | 两题都回答"历史中没有相关信息"，得分 0。证据很可能在被截掉的 85 个 chunk 里，这一结果在预期之内 |
+| 复用与原生回答（native） | 第二次运行复用已建索引，上游日志为 `Skipping indexing`；原生答案为 "You did not mention this information." |
+| 来源追踪 | MemoryAgentBench 不带来源 ID，来源组为空，属正常；LoCoMo 上的来源追踪只在离线测试中验证过（本地没有 LoCoMo 数据） |
+
+观察到的情况：
+
+- 每题约 111 秒，主要耗在中转服务上：第 1 题智能体 16 秒完成，随后 MemoryData 回答模型的那次调用用了约 95 秒；第 2 题 worker 内对 `/chat/completions` 重试了 3 次。与 `docs/api_models.md` 记录的连接不稳定情况一致，不是接入本身的问题。
+- 上游把 LLM 和嵌入响应缓存在 `native/outputs/memorydata/*.sqlite`。对同一索引重复提相同问题会直接命中缓存（第二轮几乎没有网络请求，也几乎不产生费用），结果完全一致；`--force` 删除 context 目录时缓存一并清除。
+- 智能体收到的是 MemoryData 已套好模板的问题文本（含答题要求和 `Current Date`），与其他方法收到的输入相同。
+- 上游日志中有一条 `Could not determine embedding dimension, using 1536`，维度本身正确，无影响。
+- 运行结束时 LongMemEval recall 报告生成失败，原因是本地缺少 `datasets/LongMemEval/.../longmemeval_s_cleaned.json`。这是原有流程对数据文件的要求，与 REMem 无关。
