@@ -1,4 +1,5 @@
 import aiohttp
+from utils.provider_utils import model_api_trust_env
 
 
 class OpenAICompatibleClient:
@@ -30,7 +31,7 @@ class OpenAICompatibleClient:
             payload["enable_thinking"] = False
             payload["chat_template_kwargs"] = {"enable_thinking": False}
         timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=model_api_trust_env()) as session:
             async with session.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,

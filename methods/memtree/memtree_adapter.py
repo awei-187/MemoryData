@@ -19,7 +19,7 @@ from openai import AzureOpenAI, BadRequestError, OpenAI
 
 from .prompt import AGGREGATE_PROMPT
 from utils.locomo_utils import dedupe_preserve_order
-from utils.provider_utils import ApproximateTokenizer, load_local_hf_tokenizer
+from utils.provider_utils import ApproximateTokenizer, load_local_hf_tokenizer, model_api_trust_env
 
 
 def _cosine_similarity(vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
@@ -119,7 +119,7 @@ class _OpenAIEmbedder(_BaseEmbedder):
             return OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
-                http_client=httpx.Client(trust_env=False),
+                http_client=httpx.Client(trust_env=model_api_trust_env()),
             )
 
         return OpenAI(api_key=self.api_key)
@@ -338,7 +338,7 @@ class MemTreeAdapter:
             return OpenAI(
                 base_url=self.llm_base_url,
                 api_key=self.llm_api_key,
-                http_client=httpx.Client(trust_env=False),
+                http_client=httpx.Client(trust_env=model_api_trust_env()),
             )
 
         if self.llm_provider in {None, "openai", "openai_compatible"} and self.llm_api_key:

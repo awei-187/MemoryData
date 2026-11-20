@@ -1,16 +1,16 @@
 agent_name: Agentic_memory_simplemem
-model: Qwen3-8B    # local Qwen3-8B vLLM service
+model: gpt-4o-mini
 temperature: 0.7
 input_length_limit: 10000000
 buffer_length: 1000
-output_dir: ./results/outputs/Qwen3-8B-simplemem
+output_dir: ./results/outputs/api/hybrid_simplemem
 provider: openai_compatible
 api_key_env: OPENAI_API_KEY
-base_url: http://127.0.0.1:9911/v1    # keep the top-level client aligned with SimpleMem's own chat endpoint
-base_url_env:
-tokenizer_encoding: cl100k_base
+base_url:
+base_url_env: OPENAI_BASE_URL
+tokenizer_encoding: o200k_base
 
-simplemem_base_url: http://127.0.0.1:9911/v1    # local Qwen3-8B chat service for overnight lane 4
+simplemem_base_url:
 simplemem_enable_thinking: false
 simplemem_use_streaming: false
 simplemem_enable_planning: true
@@ -20,12 +20,21 @@ simplemem_enable_parallel_processing: true
 simplemem_max_parallel_workers: 4
 simplemem_enable_parallel_retrieval: true
 simplemem_max_retrieval_workers: 3
-embedding_model: Qwen3-Embedding-4B
+embedding_model: text-embedding-3-small
 embedding_api_key_env: OPENAI_API_KEY
-embedding_base_url: http://127.0.0.1:9009/v1
-embedding_dim: 2560
+embedding_base_url:
+embedding_dim: 1536
 simplemem_semantic_top_k: 25
 simplemem_keyword_top_k: 5
 simplemem_structured_top_k: 5
 simplemem_window_size: 8 # was 60
 simplemem_overlap_size: 2
+model_env: OPENAI_MODEL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+agent_variant_tag: api-models-v1
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_base_url_env: OPENAI_BASE_URL

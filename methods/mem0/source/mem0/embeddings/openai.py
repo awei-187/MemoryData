@@ -4,6 +4,7 @@ from typing import Literal, Optional
 
 import httpx
 from openai import OpenAI
+from utils.provider_utils import model_api_request_options
 
 from mem0.configs.embeddings.base import BaseEmbedderConfig
 from mem0.embeddings.base import EmbeddingBase
@@ -33,7 +34,8 @@ class OpenAIEmbedding(EmbeddingBase):
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
-            http_client=httpx.Client(trust_env=False),
+            http_client=httpx.Client(trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"}),
+            **model_api_request_options(),
         )
 
     def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None):

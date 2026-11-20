@@ -6,6 +6,10 @@ import json
 import traceback
 from argparse import ArgumentParser
 from pathlib import Path
+
+# Resolve the project .env consistently, including when launched from another cwd.
+dotenv.load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from utils.initialization import (
     load_existing_results, 
     create_agent_and_fetch_data, 
@@ -28,10 +32,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Load environment variables
-dotenv.load_dotenv()
-
 BACKFILL_LONGMEMEVAL_RECALL_METHODS = (
+    ("hindsight", "Hindsight"),
     ("simplemem", "SimpleMem"),
     ("lightmem", "LightMem"),
     ("mem0", "Mem0"),

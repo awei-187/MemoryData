@@ -20,6 +20,9 @@ from utils.locomo_utils import (
     strip_locomo_metadata,
 )
 from utils.provider_utils import (
+    resolve_model_config,
+    model_api_trust_env,
+    model_api_request_options,
     normalize_provider as _normalize_provider_fn,
     ApproximateTokenizer,
     load_local_hf_tokenizer,
@@ -28,6 +31,7 @@ from utils.artifact_paths import (
     build_memorag_cache_dir,
     resolve_artifact_root,
     resolve_results_artifact_path,
+    sanitize_artifact_component,
 )
 
 from langchain_core.documents import Document
@@ -127,6 +131,9 @@ class AgentWrapper:
             load_agent_from: Optional path to load existing agent state from
         """
         # Basic agent configuration
+        agent_config = resolve_model_config(agent_config)
+        if agent_config.get("api_only") and "memo_rag" in agent_config.get("agent_name", ""):
+            raise ValueError("MemoRAG requires a local memory model and retriever; it cannot run in the API-only profile.")
         self.agent_config = agent_config
         self.dataset_config = dataset_config
         self.agent_name = agent_config['agent_name']
@@ -208,6 +215,8 @@ class AgentWrapper:
             self._initialize_letta_agent(agent_config, dataset_config)
         elif self._is_agent_type("mem0"):
             self._initialize_mem0_agent(agent_config, dataset_config)
+        elif self._is_agent_type("hindsight"):
+            self._initialize_hindsight_agent(agent_config, dataset_config)
         elif self._is_agent_type("simplemem"):
             self._initialize_simplemem_agent(agent_config, dataset_config)
         elif self._is_agent_type("lightmem"):
@@ -485,7 +494,8 @@ class AgentWrapper:
             return OpenAI(
                 base_url=base_url,
                 api_key=api_key or "EMPTY",
-                http_client=httpx.Client(trust_env=False),
+                http_client=httpx.Client(trust_env=model_api_trust_env(self.agent_config.get("model_api_trust_env"))),
+                **model_api_request_options(),
             )
         return OpenAI(api_key=api_key)
 
@@ -507,6 +517,7 @@ class AgentWrapper:
         return any([
             self._is_agent_type("cognee"),
             self._is_agent_type("mem0"),
+            self._is_agent_type("hindsight"),
             self._is_agent_type("memoryos"),
             self._is_agent_type("simplemem"),
             self._is_agent_type("lightmem"),
@@ -1560,13 +1571,15 @@ class AgentWrapper:
         os.makedirs(mem0_runtime_dir, exist_ok=True)
 
         mem0_embedder_model = agent_config.get("mem0_embedder_model", "")
-        embedding_dims = 2560 if "Qwen3-Embedding-4B" in mem0_embedder_model else 1536
+        embedding_dims = self._infer_embedding_dimensions(
+            mem0_embedder_model, agent_config.get("embedding_dim")
+        ) or 1536
         mem0_config["history_db_path"] = os.path.join(mem0_runtime_dir, "history.db")
         mem0_config["vector_store"] = {
             "provider": "qdrant",
             "config": {
                 "path": mem0_qdrant_path,
-                "collection_name": f"mem0_{self.sub_dataset}",
+                "collection_name": sanitize_artifact_component(f"mem0_{self.sub_dataset}"),
                 "embedding_model_dims": embedding_dims,
                 "on_disk": True,
             },
@@ -1585,6 +1598,7 @@ class AgentWrapper:
                 embedder_model_name = embedder_model_name.split("/")[-1]
             embedder_config = {
                 "model": embedder_model_name,
+                "embedding_dims": embedding_dims,
             }
             embedding_api_key = self._resolve_embedding_api_key(["OPENAI_API_KEY"]) or api_key
             if embedding_base_url:
@@ -1602,6 +1616,16 @@ class AgentWrapper:
             with open(self.mem0_source_map_path, "r", encoding="utf-8") as f:
                 self.mem0_source_map = json.load(f)
         self.agent_start_time = time.time()
+
+    def _initialize_hindsight_agent(self, agent_config, dataset_config):
+        from methods.hindsight import HindsightAdapter
+
+        self.retrieve_num = int(agent_config.get("retrieve_num", 20))
+        self.chunk_size = agent_config.get("agent_chunk_size", dataset_config.get("chunk_size"))
+        self.context = ""
+        self.agent_start_time = time.time()
+        self.hindsight = HindsightAdapter(agent_config, dataset_config, self.agent_save_to_folder)
+        self.client = self._create_oai_client()
 
     def _initialize_simplemem_agent(self, agent_config, dataset_config):
         """Initialize SimpleMem agent with a per-context LanceDB path."""
@@ -1649,7 +1673,7 @@ class AgentWrapper:
         self.simplemem = SimpleMemAdapter(
             api_key=api_key,
             model=agent_config['model'],
-            base_url=agent_config.get('simplemem_base_url') or os.environ.get("SIMPLEMEM_BASE_URL"),
+            base_url=agent_config.get('simplemem_base_url') or os.environ.get("SIMPLEMEM_BASE_URL") or self._resolve_base_url(),
             db_path=self.simplemem_db_path,
             table_name=self.simplemem_table_name,
             clear_db=not os.path.exists(self.simplemem_marker_path),
@@ -1695,26 +1719,25 @@ class AgentWrapper:
                 f"LightMem requires {api_key_env} or OPENAI_API_KEY to be set."
             )
 
-        lightmem_model = os.environ.get("LIGHTMEM_MODEL", agent_config['model'])
+        lightmem_model = (agent_config['model'] if agent_config.get("model_env")
+                          else os.environ.get("LIGHTMEM_MODEL", agent_config['model']))
         lightmem_base_url = (
-            os.environ.get("LIGHTMEM_BASE_URL")
-            or agent_config.get('lightmem_base_url')
+            agent_config.get('lightmem_base_url')
+            or os.environ.get("LIGHTMEM_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
         )
         self.client = OpenAI(
             api_key=api_key,
             base_url=lightmem_base_url,
-            http_client=httpx.Client(trust_env=False),
+            http_client=httpx.Client(trust_env=model_api_trust_env(agent_config.get("model_api_trust_env"))),
         )
-        lightmem_embedding_model = os.environ.get(
-            "LIGHTMEM_EMBEDDING_MODEL",
-            agent_config.get('lightmem_embedding_model', 'text-embedding-3-small')
+        lightmem_embedding_model = (
+            agent_config['embedding_model'] if agent_config.get("embedding_model_env")
+            else os.environ.get("LIGHTMEM_EMBEDDING_MODEL", agent_config.get('lightmem_embedding_model', 'text-embedding-3-small'))
         )
         lightmem_embedding_dims = int(
-            os.environ.get(
-                "LIGHTMEM_EMBEDDING_DIMENSION",
-                str(agent_config.get('lightmem_embedding_dims', 1536))
-            )
+            agent_config['embedding_dim'] if agent_config.get("embedding_dim_env")
+            else os.environ.get("LIGHTMEM_EMBEDDING_DIMENSION", agent_config.get('lightmem_embedding_dims', 1536))
         )
 
         self.lightmem = LightMemAdapter(
@@ -2399,12 +2422,14 @@ class AgentWrapper:
             self._current_eval_metadata = eval_metadata
             self._last_llm_trace = None
 
+        if self._is_agent_type("hindsight") and memorizing:
+            self._hindsight_chunk_timestamp = message.get("timestamp") if isinstance(message, dict) else None
         message = self._normalize_message_payload(message, memorizing=memorizing)
 
         # Route to appropriate agent handler based on agent type
         if 'Long_context_agent' in self.agent_name:
             return self._handle_long_context_agent(message, memorizing)
-        elif any(self._is_agent_type(agent_type) for agent_type in ["letta", "cognee", "mem0", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "memagent", "MemOS"]):
+        elif any(self._is_agent_type(agent_type) for agent_type in ["letta", "cognee", "mem0", "hindsight", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "memagent", "MemOS"]):
             return self._handle_memory_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("rag"):
             return self._handle_rag_agent(message, memorizing, query_id, context_id)
@@ -2631,6 +2656,8 @@ class AgentWrapper:
             return self._handle_cognee_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("mem0"):
             return self._handle_mem0_agent(message, memorizing, query_id, context_id)
+        elif self._is_agent_type("hindsight"):
+            return self._handle_hindsight_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("memtree"):
             return self._handle_memtree_agent(message, memorizing, query_id, context_id)
         elif self._is_agent_type("memochat"):
@@ -3147,6 +3174,49 @@ class AgentWrapper:
             )
             self.agent_start_time = time.time()  # Reset time
             return self._attach_locomo_recall_metadata(output, retrieved_source_id_groups)
+
+    def _hindsight_retain_item(self, message):
+        """(content, source_ids) that memorizing this already-normalized message sends to Hindsight."""
+        return self._prepare_memory_chunk_for_storage(message), parse_locomo_source_ids(message)
+
+    def hindsight_expected_documents(self, context_chunks):
+        """Document mapping a complete ingestion of these raw benchmark chunks records."""
+        return self.hindsight.expected_documents(
+            self._hindsight_retain_item(self._normalize_message_payload(chunk, memorizing=True))
+            for chunk in context_chunks
+        )
+
+    def _handle_hindsight_agent(self, message, memorizing, query_id, context_id):
+        if memorizing:
+            timestamp = getattr(self, "_hindsight_chunk_timestamp", None)
+            if hasattr(timestamp, "isoformat"):
+                timestamp = timestamp.isoformat()
+            content, source_ids = self._hindsight_retain_item(message)
+            self.hindsight.add_chunk(content, source_ids=source_ids, timestamp=timestamp)
+            return "Memorized"
+
+        memory_time = time.time() - self.agent_start_time
+        metadata = self._current_eval_metadata or {}
+        entries = self.hindsight.retrieve(message, query_timestamp=metadata.get("question_date"))
+        raw_contexts = [entry["text"] for entry in entries]
+        groups = [entry["source_ids"] for entry in entries]
+        prompt_override = self.agent_config.get("hindsight_memory_answer_prompt")
+        contexts = self._fit_memories_for_answer(message, raw_contexts, prompt_override=prompt_override)
+        memories = "\n".join(contexts) or "(No retrieved memories found.)"
+        response, input_tokens, output_tokens = self._generate_answer_from_memories(
+            message, memories, prompt_override=prompt_override,
+        )
+        output = self._create_standard_response(
+            response, input_tokens + self._count_tokens(memories), output_tokens,
+            memory_time, time.time() - self.agent_start_time - memory_time,
+        )
+        self._maybe_save_longmemeval_backfill_debug(
+            query_id=query_id, context_id=context_id, retrieved_paragraphs=raw_contexts,
+            query_text=message, response_text=response, retrieved_source_id_groups=groups,
+            extra_fields={"hindsight_bank_id": self.hindsight.state["bank_id"]},
+        )
+        self.agent_start_time = time.time()
+        return self._attach_locomo_recall_metadata(output, groups)
 
     def _handle_simplemem_agent(self, message, memorizing, query_id, context_id):
         """Handle message processing for SimpleMem agents."""
@@ -4343,6 +4413,9 @@ class AgentWrapper:
 
     def save_agent(self):
         """Save agent state to disk for persistence."""
+        if self._is_agent_type("hindsight"):
+            self.hindsight.save()
+            return
         # Currently only implemented for Letta agents
         if not self._is_agent_type("letta") and not self._is_agent_type("mem0") and not self._is_agent_type("cognee") and not self._is_agent_type("memtree") and not self._is_agent_type("memochat") and not self._is_agent_type("memoryos") and not self._is_agent_type("zep") and not self._is_agent_type("simplemem") and not self._is_agent_type("lightmem") and not self._is_agent_type("a_mem") and not self._is_agent_type("everos") and not self._is_agent_type("MemOS"):
             print("\n\n Agent not saved (not implemented for this agent type) \n\n")
@@ -4448,6 +4521,9 @@ class AgentWrapper:
 
     def load_agent(self):
         """Load agent state from disk."""
+        if self._is_agent_type("hindsight"):
+            self.hindsight.load()
+            return
         agent_save_folder = self.agent_save_to_folder
         assert os.path.exists(agent_save_folder), f"Folder {agent_save_folder} does not exist."
 

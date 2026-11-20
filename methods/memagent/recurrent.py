@@ -22,6 +22,7 @@ class RecurrentConfig:
     base_url: str
     api_key: str = "123-abc"
     tokenizer_model: Optional[str] = None
+    tokenizer_encoding: Optional[str] = None
     recurrent_chunk_size: int = 5000
     recurrent_max_new: int = 1024
     recurrent_max_context_len: int = 120000
@@ -36,10 +37,14 @@ class MemAgentRecurrentRunner:
             base_url=config.base_url,
             api_key=config.api_key,
         )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            config.tokenizer_model or config.model,
-            trust_remote_code=True,
-        )
+        if config.tokenizer_encoding:
+            import tiktoken
+            self.tokenizer = tiktoken.get_encoding(config.tokenizer_encoding)
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                config.tokenizer_model or config.model,
+                trust_remote_code=True,
+            )
 
     async def arun(self, context: str, prompt: str, verbose: bool = False) -> str:
         input_ids = self.tokenizer.encode(context.strip())

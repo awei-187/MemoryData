@@ -1,0 +1,49 @@
+# Hindsight retains/recalls; MemoryData generates and evaluates answers.
+agent_name: Agentic_memory_hindsight
+model: gpt-4o-mini
+model_env: OPENAI_MODEL
+temperature: 0.7
+input_length_limit: 30000
+buffer_length: 1000
+model_context_window: 32768
+output_dir: ./results/outputs/api/hybrid_hindsight
+provider: openai_compatible
+api_key_env: OPENAI_API_KEY
+base_url:
+base_url_env: OPENAI_BASE_URL
+# This relay requires the existing system proxy; local Hindsight traffic stays direct.
+model_api_trust_env: true
+tokenizer_encoding: o200k_base
+agent_chunk_size: 4096
+retrieve_num: 20
+
+# Hindsight is a separate, already-running service, not an OpenAI endpoint.
+hindsight_base_url: http://127.0.0.1:8888
+hindsight_base_url_env: HINDSIGHT_API_URL
+hindsight_api_key_env: HINDSIGHT_API_KEY
+hindsight_timeout_seconds: 300
+hindsight_wait_for_consolidation: true
+hindsight_settle_timeout_seconds: 300
+hindsight_recall_budget: mid
+hindsight_recall_max_tokens: 4096
+hindsight_recall_types: [world, experience, observation]
+# Native bank overrides. Models/embeddings/reranker are configured server-side.
+hindsight_bank_config: {}
+agent_variant_tag: api-models-v1-hindsight-retain-recall
+
+# Used by scripts/run_hindsight_server.py. Credentials stay in the root .env.
+hindsight_source_path: E:/AML/hindsight
+hindsight_llm_model: gpt-4o-mini
+hindsight_embeddings_model: text-embedding-3-small
+hindsight_embeddings_dimensions: 1536
+hindsight_reranker_provider: rrf
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+embedding_model: text-embedding-3-small
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_api_key_env: OPENAI_API_KEY
+embedding_base_url:
+embedding_base_url_env: OPENAI_BASE_URL

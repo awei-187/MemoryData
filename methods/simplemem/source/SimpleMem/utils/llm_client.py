@@ -2,6 +2,7 @@
 LLM Client - Handles all LLM interactions
 """
 import json
+import os
 from typing import List, Dict, Any, Optional
 import httpx
 from openai import OpenAI
@@ -39,7 +40,7 @@ class LLMClient:
         self.client = OpenAI(
             base_url=self.base_url,
             api_key=self.api_key,
-            http_client=httpx.Client(trust_env=False),
+            http_client=httpx.Client(trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"}),
         )
 
     def chat_completion(

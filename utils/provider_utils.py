@@ -4,7 +4,91 @@ Centralises provider normalisation, env-var resolution, LangChain client
 factories, and the ApproximateTokenizer fallback used across method modules.
 """
 import os
+import math
 from pathlib import Path
+
+
+def model_api_request_options(environment=None):
+    """Optional request reliability settings; absent variables preserve SDK defaults."""
+    env = os.environ if environment is None else environment
+    options = {}
+    if env.get('OPENAI_API_CONNECT_TIMEOUT_SECONDS'):
+        import httpx
+        connect = float(env['OPENAI_API_CONNECT_TIMEOUT_SECONDS'])
+        if not math.isfinite(connect) or connect <= 0:
+            raise ValueError('OPENAI_API_CONNECT_TIMEOUT_SECONDS must be positive and finite')
+        options['timeout'] = httpx.Timeout(600.0, connect=connect)
+    if env.get('OPENAI_API_MAX_RETRIES'):
+        retries = int(env['OPENAI_API_MAX_RETRIES'])
+        if not 0 <= retries <= 10:
+            raise ValueError('OPENAI_API_MAX_RETRIES must be between 0 and 10')
+        options['max_retries'] = retries
+    return options
+
+
+def model_api_trust_env(value=None):
+    """Allow remote model clients to use HTTP(S)_PROXY; keep legacy default."""
+    if value is None:
+        value = os.environ.get("OPENAI_API_TRUST_ENV", "false")
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized not in {"true", "false", "1", "0"}:
+        raise ValueError("OPENAI_API_TRUST_ENV must be true or false")
+    return normalized in {"true", "1"}
+
+
+def resolve_model_config(config, environment=None):
+    """Resolve opt-in model settings and native adapter aliases, never API keys.
+
+    Legacy configs without *_env model fields retain their existing behavior.
+    This runs before output naming and is also safe to call from AgentWrapper.
+    """
+    env = os.environ if environment is None else environment
+    resolved = dict(config)
+    model_variable = config.get("model_env")
+    if model_variable:
+        model = str(env.get(model_variable) or config.get("model") or "").strip()
+        if not model:
+            raise ValueError("Answer model is empty")
+        resolved["model"] = model
+        for alias in ("zep_local_small_model", "zep_local_answer_model",
+                      "memtree_aggregate_model", "hindsight_llm_model"):
+            if alias in config:
+                resolved[alias] = model
+    embedding_variable = config.get("embedding_model_env")
+    if embedding_variable:
+        embedding = str(env.get(embedding_variable) or config.get("embedding_model") or "").strip()
+        if not embedding:
+            raise ValueError("Embedding model is empty")
+        resolved["embedding_model"] = embedding
+        for alias in ("text_embedding", "mem0_embedder_model", "embedder_model",
+                      "lightmem_embedding_model", "a_mem_embedding_model",
+                      "memtree_embedding_model", "hindsight_embeddings_model"):
+            if alias in config:
+                resolved[alias] = embedding
+    dimension_variable = config.get("embedding_dim_env")
+    if dimension_variable:
+        dimensions = int(env.get(dimension_variable) or config.get("embedding_dim", 1536))
+        if dimensions <= 0:
+            raise ValueError("Embedding dimensions must be positive")
+        resolved["embedding_dim"] = dimensions
+        for alias in ("lightmem_embedding_dims", "hindsight_embeddings_dimensions"):
+            if alias in config:
+                resolved[alias] = dimensions
+    trust_variable = config.get("model_api_trust_env_env")
+    if trust_variable and env.get(trust_variable):
+        resolved["model_api_trust_env"] = model_api_trust_env(env[trust_variable])
+    # Materialize endpoint aliases used by adapters that do not resolve *_env.
+    if model_variable:
+        url = config.get("base_url") or env.get(config.get("base_url_env") or "OPENAI_BASE_URL")
+        for alias in ("a_mem_base_url", "simplemem_base_url", "lightmem_base_url",
+                      "zep_local_answer_base_url"):
+            if alias in config and not config[alias]:
+                resolved[alias] = url
+        if "memagent" in str(config.get("agent_name", "")).lower():
+            resolved["base_url"] = url
+    return resolved
 
 
 class ApproximateTokenizer:

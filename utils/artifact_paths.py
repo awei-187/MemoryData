@@ -5,6 +5,7 @@ from utils.locomo_utils import get_locomo_category_slug
 
 
 _MEMORY_AGENT_HINTS = (
+    "hindsight",
     "mem0",
     "cognee",
     "memtree",
@@ -18,6 +19,12 @@ _MEMORY_AGENT_HINTS = (
     "everos",
     "MemOS",
 )
+
+
+def sanitize_artifact_component(value):
+    """Encode Windows-invalid filename characters without changing source IDs."""
+    return re.sub(r'[<>:"/\\|?*%\x00-\x1f]',
+                  lambda match: f"%{ord(match.group()):02X}", str(value))
 
 
 def resolve_artifact_root(command_line_args=None, agent_config=None):
@@ -139,7 +146,7 @@ def generate_memory_agent_base_path(agent_config, dataset_config, artifact_root=
     base_path = resolve_results_artifact_path(
         artifact_root,
         "agents",
-        (
+        sanitize_artifact_component(
             f"{agent_name}_{dataset_config['sub_dataset']}{dataset_variant_suffix}"
             f"_chunk{chunk_component}_model{agent_config['model']}{variant_suffix}"
         ),
@@ -159,7 +166,7 @@ def generate_rag_agent_path(agent_config, dataset_config, current_context_index,
     return resolve_results_artifact_path(
         artifact_root,
         "agents",
-        folder_name,
+        sanitize_artifact_component(folder_name),
         f"exp_{current_context_index}",
     )
 
@@ -169,7 +176,7 @@ def generate_default_agent_path(agent_config, dataset_config, current_context_in
     return resolve_results_artifact_path(
         artifact_root,
         "agents",
-        f"{agent_config['agent_name']}_{dataset_config['sub_dataset']}{dataset_variant_suffix}",
+        sanitize_artifact_component(f"{agent_config['agent_name']}_{dataset_config['sub_dataset']}{dataset_variant_suffix}"),
         f"exp_{current_context_index}",
     )
 

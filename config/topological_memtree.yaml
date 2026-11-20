@@ -1,11 +1,11 @@
 # ── required ──────────────────────────────────────────────────────────────────
 agent_name: Agentic_memory_memtree
-model: Qwen3-8B
+model: gpt-4o-mini
 temperature: 0.0
 input_length_limit: 10000000
 model_context_window: 32768
 buffer_length: 1000
-output_dir: ./results/outputs/Qwen3-8B-memtree
+output_dir: ./results/outputs/api/topological_memtree
 agent_chunk_size: 4096
 retrieve_num: 2 # was 10
 
@@ -13,17 +13,17 @@ retrieve_num: 2 # was 10
 provider: openai_compatible
 api_key:
 api_key_env: OPENAI_API_KEY
-base_url: http://127.0.0.1:9910/v1
-base_url_env:
-tokenizer_encoding: cl100k_base
+base_url:
+base_url_env: OPENAI_BASE_URL
+tokenizer_encoding: o200k_base
 
 # ── optional (embedding model) ────────────────────────────────────────────────
-embedding_model: Qwen3-Embedding-4B
+embedding_model: text-embedding-3-small
 embedding_provider: openai_compatible
 embedding_api_key:
 embedding_api_key_env: OPENAI_API_KEY
-embedding_base_url: http://127.0.0.1:9010/v1
-embedding_base_url_env:
+embedding_base_url:
+embedding_base_url_env: OPENAI_BASE_URL
 
 # ── optional (memtree adapter tuning) ────────────────────────────────────────
 memtree_base_threshold: 0.4
@@ -32,3 +32,11 @@ memtree_max_depth: 15
 memtree_summary_max_tokens: 256
 memtree_aggregate_temperature: 0.0
 memtree_aggregate_model:
+model_env: OPENAI_MODEL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+agent_variant_tag: api-models-v1
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS

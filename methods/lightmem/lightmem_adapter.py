@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import httpx
 from openai import OpenAI
+from utils.provider_utils import model_api_trust_env
 from utils.locomo_utils import (
     build_locomo_storage_text,
     parse_locomo_metadata,
@@ -84,7 +85,7 @@ class LightMemAdapter:
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
-            http_client=httpx.Client(trust_env=False),
+            http_client=httpx.Client(trust_env=model_api_trust_env()),
         )
         config_payload = {
             "pre_compress": pre_compress,

@@ -28,6 +28,7 @@ from tqdm import tqdm
 
 
 from utils.provider_utils import (
+    model_api_trust_env,
     normalize_provider as _normalize_provider,
     resolve_env_value as _resolve_env_value,
     resolve_base_url as _resolve_base_url,
@@ -81,7 +82,7 @@ def _create_embedding_model_client(model, provider="openai", base_url=None, base
     if api_key:
         kwargs["api_key"] = api_key
     if resolved_base_url:
-        kwargs["http_client"] = httpx.Client(trust_env=False)
+        kwargs["http_client"] = httpx.Client(trust_env=model_api_trust_env())
     return OpenAIEmbeddings(**kwargs)
 
 
@@ -106,7 +107,7 @@ def _create_llm_client(provider="openai", base_url=None, base_url_env=None, api_
     if api_key:
         kwargs["api_key"] = api_key
     if resolved_base_url:
-        kwargs["http_client"] = httpx.Client(trust_env=False)
+        kwargs["http_client"] = httpx.Client(trust_env=model_api_trust_env())
     return OpenAI(**kwargs)
 
 # Create a custom embedding class for Contriever

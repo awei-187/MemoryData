@@ -259,6 +259,7 @@ BASE_TEMPLATES = {
 # Order matters: more specific prefixes must come before "rag", because agent names like
 # "Agentic_memory_self_rag" and "Structure_rag_mem0" contain the substring "rag".
 AGENT_TYPE_MAPPING = [
+    ("hindsight", "agentic_memory_agent"),
     ("Long_context_agent", "long_context_agent"),
     ("Agentic_memory", "agentic_memory_agent"),
     ("letta", "agentic_memory_agent"),
