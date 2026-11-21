@@ -43,8 +43,12 @@ def handle(op, args):
             import multiprocessing
             STATE["manager"] = multiprocessing.Manager()
             STATE["times"] = STATE["manager"].dict()
+            Path("mp_child.pid").write_text(str(STATE["manager"]._process.pid), encoding="utf-8")
         log("open", docs=len(args.get("docs") or []))
         return {"opened": True}
+    if op == "crash":
+        # A native crash: no reply, no cleanup of child processes.
+        os._exit(3)
     if op in {"index", "reopen"}:
         log(op)
         if op == "reopen":

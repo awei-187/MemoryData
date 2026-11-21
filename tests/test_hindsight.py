@@ -412,12 +412,18 @@ class AdapterTests(unittest.TestCase):
         a.retrieve('Question?', query_timestamp='2023-05-27T22:54:00+08:00')
         self.assertEqual(self.backend.calls[-1][2]['query_timestamp'], '2023-05-27T22:54:00+08:00')
 
-    def test_invalid_question_date_fails_before_recall_request(self):
+    def test_invalid_question_date_is_dropped_with_a_warning(self):
+        # An unknown date format must not fail the question: recall runs without
+        # a time anchor and the value is reported (strict parsing stays available
+        # as normalize_query_timestamp).
         a = self.ready()
-        count = len(self.backend.calls)
-        with self.assertRaisesRegex(ValueError, 'query_timestamp'):
+        with self.assertLogs('methods.hindsight.hindsight_adapter', 'WARNING') as logs:
             a.retrieve('Question?', query_timestamp='2023/99/27 (Sat) 22:54')
-        self.assertEqual(len(self.backend.calls), count)
+        self.assertIn('query_timestamp', logs.output[0])
+        self.assertNotIn('query_timestamp', self.backend.calls[-1][2])
+        from methods.hindsight.hindsight_adapter import normalize_query_timestamp
+        with self.assertRaisesRegex(ValueError, 'query_timestamp'):
+            normalize_query_timestamp('2023/99/27 (Sat) 22:54')
 
     def test_pending_consolidation_waits_before_marking_ready(self):
         a = self.adapter()
@@ -549,13 +555,16 @@ class MainPipelineTests(unittest.TestCase):
                 self.assertTrue(all(p.endswith("/chat/completions") for _, p, _ in backend.calls[before:]))
 
                 # Existing LongMemEval debug plumbing recognizes the new method.
-                lme = dict(dataset, dataset="accurate_retrieval", sub_dataset="longmemeval_s")
+                # The real sub-dataset name contains "*", which Windows paths reject.
+                lme = dict(dataset, dataset="accurate_retrieval", sub_dataset="longmemeval_s*")
                 debug_config = dict(config, _backfill_longmemeval_recall_debug=True,
                                     artifact_root=str(root / "runs"))
                 debug_agent = AgentWrapper(debug_config, lme, str(root / "debug_state"))
                 debug_agent._maybe_save_longmemeval_backfill_debug(query_id=0, context_id=0,
                     retrieved_paragraphs=["history"], query_text="question", response_text="Tea")
-                self.assertTrue(list((root / "runs").rglob("query_0_context_0.json")))
+                debug_files = list((root / "runs").rglob("query_0_context_0.json"))
+                self.assertTrue(debug_files)
+                self.assertIn("longmemeval_s%2A", debug_files[0].parts)
                 self.assertEqual(main._resolve_backfill_longmemeval_method(config["agent_name"]), ("hindsight", "Hindsight"))
 
             for method, path, body in backend.calls:

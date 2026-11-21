@@ -27,6 +27,19 @@ def sanitize_artifact_component(value):
                   lambda match: f"%{ord(match.group()):02X}", str(value))
 
 
+def existing_or_sanitized_component(parent, value):
+    """A path component for ``value`` (e.g. sub_dataset "longmemeval_s*") under ``parent``.
+
+    Windows rejects "*" in paths, so new directories use the sanitized name. A
+    directory an older run already created under the raw name (possible on
+    POSIX) keeps being used, so existing caches and debug files are found.
+    """
+    raw, safe = str(value), sanitize_artifact_component(value)
+    if raw != safe and parent is not None and os.path.isdir(os.path.join(str(parent), raw)):
+        return raw
+    return safe
+
+
 def resolve_artifact_root(command_line_args=None, agent_config=None):
     """Resolve an optional artifact root override from CLI or config."""
     cli_value = getattr(command_line_args, "artifact_root", None) if command_line_args is not None else None

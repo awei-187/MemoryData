@@ -52,6 +52,7 @@ TsmAdapter ──JSON lines（stdin/stdout）──> methods/tsm/tsm_worker.py
 | `model_env` / `tsm_llm_model` | Graphiti 抽取、摘要、原生回答和 MemoryData 回答都用 `OPENAI_MODEL`（gpt-4o-mini，与论文主实验一致） |
 | `embedding_model_env` / `tsm_embedding_model` / `tsm_embedding_dimensions` | `OPENAI_EMBEDDING_MODEL`（text-embedding-3-small，1536 维，与论文默认一致） |
 | `tsm_python` / `tsm_python_env` | TSM 环境的解释器，默认 `D:/conda/envs/tsm/python.exe`，可用 `TSM_PYTHON` 覆盖 |
+| `tsm_worker_timeout_seconds` / `tsm_index_seconds_per_chunk` | 每次 worker 请求的超时（默认 7200 秒）；建图和复用时的 `reopen` 再加上每个 chunk 的额度（默认 600 秒）。冒烟中建图约 120 秒/块（并发 4），完整 LongMemEval 样本 88 块约需 3 小时，固定上限会中断构建并在重跑时重付全部抽取费用 |
 | `tsm_neo4j_*` | Neo4j 地址、用户、数据库、密码变量名 |
 | `tsm_answer_mode` | `memorydata`（默认）或 `native` |
 | `tsm_graphiti_concurrency` | Graphiti 并发模型请求上限，经 `SEMAPHORE_LIMIT` 传给 worker（上游默认 20，嵌套并发实际更多）。默认配置设 4：约 40 个并发的长抽取请求在共享中转上全部超时。只影响速度，不计入身份指纹 |
@@ -103,9 +104,9 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_ts
 - 只用用户消息：上游 TSM 配置 `use_user_only: true`，只用用户发言构图和生成 persona。MemoryData 的 chunk 是多说话人混合文本，无法可靠拆出"用户"，因此关闭该选项、使用整个 chunk。
 - 粒度：上游一个叶子是一轮（用户 + 助手）；这里一个叶子是一个 MemoryData chunk（`agent_chunk_size` 4096 token），更粗。需要更接近原设置时可减小 `agent_chunk_size`。
 - 时间信息：本分支的 MemoryData chunk 一般是纯文本，没有单独的时间戳字段（只有结构化 chunk 带 `timestamp`），因此通常不加 `Date:` 头，日期留在正文里（如 LoCoMo 的 `Session 1 (1:56 pm on 8 May, 2023)`）。上游从文本中找 `YYYY-MM-DD` 或 `YYYY/MM/DD` 作为 Graphiti 的事件时间，找不到时用 2000-01-01 加序号；LoCoMo 的原始日期格式匹配不上这两种写法，上游自己的 LoCoMo 加载器同样把原始字符串放进 `Date:`，所以这一点与上游一致，但按月切片的 snapshots 实际上会集中在兜底日期，时间相关能力可能明显弱于论文描述。MemoryAgentBench 的 LongMemEval chunk 正文带 `2022/11/17` 形式的日期，能被识别。
-- 问题日期：上游对 LoCoMo 以"最后一个 session 的次日"作为问题日期；MemoryData 只在数据集提供 `question_date` 时传入（MemoryAgentBench 的 LongMemEval 有，LoCoMo 没有），没有时检索器退回"全局最新 snapshot"。
+- 问题日期：上游对 LoCoMo 以"最后一个 session 的次日"作为问题日期；MemoryData 只在数据集提供 `question_date` 时传入（MemoryAgentBench 的 LongMemEval 有，LoCoMo 没有），没有时检索器退回"全局最新 snapshot"；格式无法识别时记录一次警告并按无日期处理。
 - spaCy 英文模型未安装，上游退回空白管线，问题中的时间约束解析变弱。
-- 只支持整批构建；HaluMem 式交错提问（`prepare_for_queries`）未实现。上游的增量更新需要重新聚类和重建 snapshots，代价与完整重建相近。
+- 只支持整批构建；HaluMem 式交错提问（`prepare_for_queries`）未实现，数据集配置带 `interleave_queries` 时初始化即报错。上游的增量更新需要重新聚类和重建 snapshots，代价与完整重建相近。
 - 恢复时重新嵌入整棵树（上游行为），见上文。
 
 ## 真实 API 冒烟测试（2026-11-20 至 11-21，通过）

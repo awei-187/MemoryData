@@ -24,6 +24,8 @@ retrieve_num: 20
 remem_python: D:/conda/envs/remem/python.exe
 remem_python_env: REMEM_PYTHON
 remem_worker_timeout_seconds: 7200
+# Added per history chunk to the index timeout.
+remem_index_seconds_per_chunk: 300
 # memorydata: MemoryData answer model + shared templates (default, comparable with
 # the other presets); native: REMem's own agent answer (output_answer).
 remem_answer_mode: memorydata

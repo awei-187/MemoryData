@@ -72,6 +72,23 @@ class SharedModelTests(unittest.TestCase):
         legacy = {"model": "custom-model", "embedding_model": "custom-embedding", "base_url": "http://localhost/v1"}
         self.assertEqual(resolve_model_config(legacy, {"OPENAI_MODEL": "other"}), legacy)
 
+    def test_ignored_method_endpoint_variables_are_reported(self):
+        from utils import provider_utils
+
+        config = {"model": "m", "model_env": "OPENAI_MODEL", "lightmem_base_url": "", "simplemem_base_url": ""}
+        env = {"OPENAI_MODEL": "gpt-4o-mini", "OPENAI_BASE_URL": "http://shared/v1",
+               "LIGHTMEM_BASE_URL": "http://other/v1"}
+        with patch.object(provider_utils, "_WARNED_IGNORED_ENV", set()),                 self.assertLogs("utils.provider_utils", "WARNING") as logs:
+            resolved = resolve_model_config(config, env)
+            resolve_model_config(config, env)  # reported once
+        self.assertEqual(resolved["lightmem_base_url"], "http://shared/v1")
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("LIGHTMEM_BASE_URL is set but ignored", logs.output[0])
+        explicit = dict(config, lightmem_base_url="http://yaml/v1")
+        with patch.object(provider_utils, "_WARNED_IGNORED_ENV", set()),                 patch.object(provider_utils.logger, "warning") as warning:
+            self.assertEqual(resolve_model_config(explicit, env)["lightmem_base_url"], "http://yaml/v1")
+        warning.assert_not_called()
+
     def test_invalid_dimensions_and_proxy_flag_fail_early(self):
         config = {"embedding_dim_env": "DIMS"}
         for value in ("0", "-1", "not-a-number"):

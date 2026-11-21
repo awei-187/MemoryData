@@ -3,9 +3,28 @@
 Centralises provider normalisation, env-var resolution, LangChain client
 factories, and the ApproximateTokenizer fallback used across method modules.
 """
+import logging
 import os
 import math
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
+_WARNED_IGNORED_ENV = set()
+
+# Method-specific endpoint variables that the unified profile fills from the
+# shared endpoint; the adapters would otherwise have read them.
+UNIFIED_BASE_URL_OVERRIDES = {"simplemem_base_url": "SIMPLEMEM_BASE_URL",
+                              "lightmem_base_url": "LIGHTMEM_BASE_URL"}
+
+
+def warn_ignored_env_overrides(names, reason, environment=None):
+    """Warn once per variable that is set but has no effect under the unified model profile."""
+    env = os.environ if environment is None else environment
+    for name in names:
+        if env.get(name) and name not in _WARNED_IGNORED_ENV:
+            _WARNED_IGNORED_ENV.add(name)
+            logger.warning("%s is set but ignored: %s", name, reason)
 
 
 def model_api_request_options(environment=None):
@@ -89,6 +108,11 @@ def resolve_model_config(config, environment=None):
                       "zep_local_answer_base_url"):
             if alias in config and not config[alias]:
                 resolved[alias] = url
+                if alias in UNIFIED_BASE_URL_OVERRIDES:
+                    warn_ignored_env_overrides(
+                        [UNIFIED_BASE_URL_OVERRIDES[alias]],
+                        f"model_env is set, so {alias} uses the shared endpoint "
+                        "(set the YAML field explicitly to use another one)", env)
         if "memagent" in str(config.get("agent_name", "")).lower():
             resolved["base_url"] = url
     return resolved

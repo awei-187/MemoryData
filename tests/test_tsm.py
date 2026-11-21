@@ -35,6 +35,7 @@ class FakeWorker:
 
     def call(self, op, timeout=None, **args):
         self.log.append((op, args))
+        self.timeouts = getattr(self, "timeouts", []) + [(op, timeout)]
         if op == "open":
             self.docs = args["docs"]
             self.cache = Path(args["cache_folder"])
@@ -166,6 +167,32 @@ class AdapterTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, message):
                 self.adapter(dict(self.config, **change))
 
+    def test_build_calls_get_a_timeout_that_grows_with_the_history(self):
+        config = dict(self.config, tsm_worker_timeout_seconds=100, tsm_index_seconds_per_chunk=10)
+        adapter = self.adapter(config)
+        for text in ("a", "b", "c"):
+            adapter.add_chunk(text)
+        self.assertEqual(adapter.build_timeout(), 130)
+        adapter.save()
+        adapter.close()
+        adapter.retrieve("q")  # a new worker must reopen the build
+        timeouts = [entry for worker in self.workers for entry in getattr(worker, "timeouts", [])]
+        self.assertIn(("index", 130), timeouts)
+        self.assertIn(("reopen", 130), timeouts)
+        self.assertIn(("query", None), timeouts)
+        with self.assertRaisesRegex(ValueError, "tsm_index_seconds_per_chunk"):
+            self.adapter(dict(self.config, tsm_index_seconds_per_chunk=-1), name="bad")
+
+    def test_unparseable_question_date_is_dropped_with_a_warning(self):
+        adapter = self.ready()
+        with self.assertLogs("methods.hindsight.hindsight_adapter", "WARNING") as logs:
+            adapter.retrieve("q", query_timestamp="the week after Easter 2023")
+        self.assertIn("Ignoring question date", logs.output[0])
+        query_args = [args for op, args in self.calls if op == "query"]
+        self.assertIsNone(query_args[-1]["question_date"])
+        adapter.retrieve("q", query_timestamp="2023/05/20 (Sat) 02:21")
+        self.assertEqual([args for op, args in self.calls if op == "query"][-1]["question_date"], "2023-05-20T02:21:00")
+
     def test_release_patches_are_part_of_the_identity(self):
         patched = self.adapter().identity
         with patch("methods.tsm.tsm_adapter.RELEASE_PATCHES", ()):
@@ -214,6 +241,14 @@ class WorkerGlueTests(unittest.TestCase):
         self.assertEqual(build(config=config, cache=False), {"config": config, "cache": False})
         self.assertFalse(self.worker.is_reasoning_model("gpt-4.1-nano"))
         self.assertTrue(self.worker.is_reasoning_model("o3-mini"))
+
+    def test_interleaved_datasets_are_refused_before_any_worker_starts(self):
+        from methods import worker_agent_support
+
+        for method in worker_agent_support.WORKER_METHODS:
+            with self.subTest(method=method), patch("methods.worker_bridge.close_all_workers") as close,                     self.assertRaisesRegex(ValueError, "interleave"):
+                worker_agent_support.initialize(object(), {}, {"interleave_queries": True}, method)
+            close.assert_not_called()
 
     def test_dense_index_bridge_runs_outside_the_callers_event_loop(self):
         import asyncio

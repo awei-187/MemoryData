@@ -24,6 +24,14 @@ def worker_method(wrapper):
 def initialize(wrapper, agent_config, dataset_config, method):
     from methods.worker_bridge import close_all_workers
 
+    if dataset_config.get("interleave_queries"):
+        # Checked before any worker starts or any chunk is buffered, so such a
+        # run stops at construction instead of at its first question.
+        raise ValueError(
+            f"{method} builds its index once from the complete history (save()); questions "
+            "interleaved with history chunks (interleave_queries, e.g. HaluMem's session "
+            "protocol) are not supported")
+
     # Contexts run one after another: stop the previous context's worker first.
     close_all_workers()
     if method == "remem":

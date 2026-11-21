@@ -27,6 +27,14 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
+try:
+    from utils.artifact_paths import existing_or_sanitized_component
+except ImportError:  # run as a script: python evaluation/longmemeval/memoryagentbench_longmemeval_recall.py
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from utils.artifact_paths import existing_or_sanitized_component
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAB_ARROW = (
@@ -466,25 +474,24 @@ def infer_debug_dir_from_results(results_file: Path, report: dict) -> Path:
             f"Cannot infer debug dir from {results_file}: missing {', '.join(missing_fields)}"
         )
 
+    # Writers sanitize sub_dataset ("longmemeval_s*" is not a valid Windows
+    # path); directories created earlier under the raw name are still found.
+    legacy_parent = REPO_ROOT / "results/outputs/rag_retrieved" / str(agent_name) / f"k_{retrieve_num}"
     legacy_debug_dir = (
-        REPO_ROOT
-        / "results/outputs/rag_retrieved"
-        / str(agent_name)
-        / f"k_{retrieve_num}"
-        / str(sub_dataset)
+        legacy_parent
+        / existing_or_sanitized_component(legacy_parent, sub_dataset)
         / f"chunksize_{chunk_size}"
     )
     if not output_dir:
         return legacy_debug_dir
 
     output_label = Path(str(output_dir)).name
+    scoped_parent = (
+        REPO_ROOT / "results/outputs/rag_retrieved" / output_label / str(agent_name) / f"k_{retrieve_num}"
+    )
     scoped_debug_dir = (
-        REPO_ROOT
-        / "results/outputs/rag_retrieved"
-        / output_label
-        / str(agent_name)
-        / f"k_{retrieve_num}"
-        / str(sub_dataset)
+        scoped_parent
+        / existing_or_sanitized_component(scoped_parent, sub_dataset)
         / f"in{context_max_length}_max_samples{max_test_samples}"
         / f"chunksize_{chunk_size}"
     )

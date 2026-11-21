@@ -16,7 +16,7 @@ import re
 import uuid
 from pathlib import Path
 
-from methods.hindsight.hindsight_adapter import normalize_query_timestamp
+from methods.hindsight.hindsight_adapter import query_timestamp_or_none
 from methods.worker_bridge import (BufferedWorkerAdapter, WorkerProcess, resolve_worker_python,
                                    worker_environment)
 from utils.repo_paths import portable
@@ -135,6 +135,11 @@ class TsmAdapter(BufferedWorkerAdapter):
         self.top_k = int(agent_config.get("retrieve_num", 20))
         self.answer_mode = str(agent_config.get("tsm_answer_mode", "memorydata"))
         self.timeout = float(agent_config.get("tsm_worker_timeout_seconds", 7200))
+        # Added per history chunk to the index/reopen timeout (build_timeout()); the
+        # smoke build took about 120 s per 4096-token chunk at concurrency 4.
+        self.index_seconds_per_chunk = float(agent_config.get("tsm_index_seconds_per_chunk", 600))
+        if self.index_seconds_per_chunk < 0:
+            raise ValueError("tsm_index_seconds_per_chunk must not be negative")
         self.concurrency = graphiti_concurrency(agent_config)
         if self.answer_mode not in ANSWER_MODES or self.top_k <= 0 or self.timeout <= 0:
             raise ValueError("tsm_answer_mode must be memorydata or native; retrieve_num and timeout must be positive")
@@ -187,7 +192,7 @@ class TsmAdapter(BufferedWorkerAdapter):
             return
         if not self.state["documents"]:
             raise RuntimeError("TSM received no history to build")
-        stats = self._worker().call("index")
+        stats = self._worker().call("index", timeout=self.build_timeout())
         self.built = True
         self.mark_ready(stats)
 
@@ -204,9 +209,9 @@ class TsmAdapter(BufferedWorkerAdapter):
         self.require_ready()
         worker = self._worker()
         if not self.built:
-            worker.call("reopen")
+            worker.call("reopen", timeout=self.build_timeout())
             self.built = True
-        result = worker.call("query", query=query, question_date=normalize_query_timestamp(query_timestamp),
+        result = worker.call("query", query=query, question_date=query_timestamp_or_none(query_timestamp),
                              native_answer=native_answer)
         positions = [int(p) for p in result.get("leaf_positions") or []]
         texts = [str((result.get("leaf_texts") or {}).get(str(p), "")) for p in positions]

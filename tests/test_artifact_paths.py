@@ -5,7 +5,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from utils.artifact_paths import generate_agent_save_folder_path, sanitize_artifact_component
+from utils.artifact_paths import (
+    existing_or_sanitized_component,
+    generate_agent_save_folder_path,
+    sanitize_artifact_component,
+)
 
 
 class WindowsArtifactPathTests(unittest.TestCase):
@@ -75,6 +79,14 @@ class WindowsArtifactPathTests(unittest.TestCase):
     def test_literal_encoding_and_illegal_character_do_not_collide(self):
         self.assertNotEqual(sanitize_artifact_component('source*'), sanitize_artifact_component('source%2A'))
         self.assertEqual(sanitize_artifact_component('source*'), 'source%2A')
+
+    def test_new_directories_are_sanitized_but_existing_raw_ones_are_reused(self):
+        with tempfile.TemporaryDirectory() as parent:
+            self.assertEqual(existing_or_sanitized_component(parent, 'longmemeval_s*'), 'longmemeval_s%2A')
+            self.assertEqual(existing_or_sanitized_component(parent, 'locomo_qa'), 'locomo_qa')
+            raw = pathlib.Path(parent) / 'odd%name'  # creatable everywhere, sanitized differently
+            raw.mkdir()
+            self.assertEqual(existing_or_sanitized_component(parent, 'odd%name'), 'odd%name')
 
 
 if __name__ == '__main__':

@@ -61,6 +61,96 @@ def atomic_save_json(path, value):
     os.replace(temporary, path)
 
 
+def _kill_on_close_job(process):
+    """Windows: put ``process`` in a job object that kills every member when its handle closes.
+
+    Processes the worker starts (TSM's mp.Manager, mp.Pool workers) join the job
+    automatically and inherit the context folder as working directory. Closing
+    the handle in WorkerProcess.close() stops them even when the worker itself
+    crashed without cleaning up; if MemoryData dies, Windows closes the handle.
+    Returns None (taskkill /T remains the fallback) where this is unavailable.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+        class ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", BasicLimits), ("IoInfo", IoCounters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        limits = ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if (kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits))
+                and kernel32.AssignProcessToJobObject(job, int(process._handle))):
+            return job
+        kernel32.CloseHandle(job)
+    except (OSError, AttributeError, ValueError):
+        pass
+    return None
+
+
+def _close_job(job, timeout=30.0):
+    """Terminate every process in the job and wait until each one has exited.
+
+    Termination is asynchronous; the caller often deletes the context folder
+    next, which fails while a terminating member still holds it as its cwd.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessIdList(ctypes.Structure):
+        _fields_ = [("NumberOfAssignedProcesses", wintypes.DWORD), ("NumberOfProcessIdsInList", wintypes.DWORD),
+                    ("ProcessIdList", ctypes.c_size_t * 256)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                   wintypes.DWORD, ctypes.c_void_p]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    members = []
+    try:
+        ids = ProcessIdList()
+        if kernel32.QueryInformationJobObject(job, 3, ctypes.byref(ids), ctypes.sizeof(ids), None):  # pid list
+            for pid in ids.ProcessIdList[:ids.NumberOfProcessIdsInList]:
+                handle = kernel32.OpenProcess(0x00100000, False, int(pid))  # SYNCHRONIZE
+                if handle:
+                    members.append(handle)
+        kernel32.TerminateJobObject(job, 1)
+        for handle in members:
+            kernel32.WaitForSingleObject(handle, int(timeout * 1000))
+    finally:
+        for handle in members:
+            kernel32.CloseHandle(handle)
+        kernel32.CloseHandle(job)
+
+
 class WorkerError(RuntimeError):
     """The worker reported a failure or stopped answering."""
 
@@ -90,6 +180,9 @@ class WorkerProcess:
             cwd=str(cwd), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self._log, bufsize=0,
         )
+        # The worker starts no process before its first request, so assigning
+        # it right after creation covers every descendant.
+        self._job = _kill_on_close_job(self.process)
         self._reader = threading.Thread(target=self._read_replies, daemon=True)
         self._reader.start()
         _LIVE_WORKERS.add(self)
@@ -136,7 +229,9 @@ class WorkerProcess:
 
     def _kill_tree(self):
         """Force-stop the worker together with any processes it started."""
-        if os.name == "nt":
+        if self._job is not None:
+            self._release_job()  # kills every process in the job
+        elif os.name == "nt":
             # Children do not die with their parent on Windows; /T walks the tree.
             try:
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
@@ -145,6 +240,11 @@ class WorkerProcess:
                 pass
         if self.process.poll() is None:
             self.process.kill()
+
+    def _release_job(self):
+        job, self._job = self._job, None
+        if job is not None:
+            _close_job(job)
 
     def close(self, kill=False):
         if self.closed:
@@ -166,6 +266,9 @@ class WorkerProcess:
                 self.process.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 pass
+        # Also when the worker already exited on its own (e.g. a native crash):
+        # processes it started may still hold the context folder.
+        self._release_job()
         for stream in (self.process.stdin, self.process.stdout):
             try:
                 stream.close()
@@ -288,6 +391,15 @@ class BufferedWorkerAdapter:
     def worker_lost(self):
         """Hook: forget in-worker state (e.g. a loaded index) after the worker stopped."""
 
+    def build_timeout(self):
+        """Timeout for whole-history build/reopen calls, which grow with the history.
+
+        A fixed limit kills long builds (TSM: about 120 s per 4096-token chunk at
+        concurrency 4), and each retry then pays for the whole extraction again.
+        """
+        per_chunk = float(getattr(self, "index_seconds_per_chunk", 0) or 0)
+        return self.timeout + per_chunk * max(1, len(self.state.get("documents") or []))
+
     def mark_ready(self, stats):
         self.state.update({"ready": True, "index_stats": stats})
         atomic_save_json(self.path, self.state)
@@ -304,6 +416,7 @@ class BufferedWorkerAdapter:
         if self.worker is not None:
             self.worker.close()
             self.worker = None
+            self.worker_lost()  # a later worker has to load the index again
 
 
 def resolve_worker_python(agent_config, key, env_key):

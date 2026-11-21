@@ -292,10 +292,15 @@ class WorkerProcessTests(unittest.TestCase):
                        FAKE_WORKER_KIND="remem", FAKE_MP_CHILD="1")
             # multiprocessing children (TSM's mp.Manager) inherit the cwd; neither a
             # clean shutdown nor a forced kill may leave them holding it.
-            for name, kill in (("clean", False), ("killed", True)):
+            for name, kill in (("clean", False), ("killed", True), ("crashed", False)):
                 cwd = Path(directory) / name
                 worker = WorkerProcess(sys.executable, FAKE_WORKER, cwd=cwd, env=env, log_dir=directory, timeout=60)
                 worker.call("open", docs=[])
+                if name == "crashed":
+                    # The worker dies without stopping its child; close() must still release cwd.
+                    with self.assertRaisesRegex(WorkerError, "exited during 'crash'"):
+                        worker.call("crash")
+                    worker.process.wait(timeout=30)
                 worker.close(kill=kill)
                 shutil.rmtree(cwd)
         with self.assertRaisesRegex(FileNotFoundError, "conda environment"):

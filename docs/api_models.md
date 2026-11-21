@@ -21,6 +21,8 @@
 
 LightMem、A-MEM、SimpleMem、Mem0、MemOS、Letta、Zep Local、Hindsight 等各自的模型字段和向量维度同步使用这套设置。Hindsight 服务由本仓库启动器启动时，其原生抽取和嵌入也读取这些变量；已有服务需自行重启并对齐配置。显式设置原生 `HINDSIGHT_API_*` 模型变量仍可覆盖服务设置，正式比较时应检查它们是否存在。
 
+启用 `*_env` 字段后，各方法旧的专用环境变量不再生效：`LIGHTMEM_MODEL`、`LIGHTMEM_EMBEDDING_MODEL`、`LIGHTMEM_EMBEDDING_DIMENSION` 由统一模型设置取代，`LIGHTMEM_BASE_URL`、`SIMPLEMEM_BASE_URL` 由共享的 `OPENAI_BASE_URL` 取代（YAML 中显式填写的 `lightmem_base_url`、`simplemem_base_url` 仍优先）。这些变量若仍被设置，运行时会记录一次 `... is set but ignored` 警告。
+
 `.env` 已被 Git 忽略；本机原密钥和 API 地址已保留，修改前备份位于忽略的 `results/env-backups/`。示例文件只有占位值。
 
 ## 原有运行方式

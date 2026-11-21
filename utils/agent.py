@@ -22,6 +22,7 @@ from utils.locomo_utils import (
 )
 from utils.provider_utils import (
     resolve_model_config,
+    warn_ignored_env_overrides,
     model_api_trust_env,
     model_api_request_options,
     normalize_provider as _normalize_provider_fn,
@@ -33,6 +34,7 @@ from utils.artifact_paths import (
     resolve_artifact_root,
     resolve_results_artifact_path,
     sanitize_artifact_component,
+    existing_or_sanitized_component,
 )
 
 from langchain_core.documents import Document
@@ -1038,12 +1040,15 @@ class AgentWrapper:
             f"in{self.dataset_config.get('context_max_length', 'unknown')}"
             f"_max_samples{self.dataset_config.get('max_test_samples', 'unknown')}"
         )
-        return os.path.join(
+        parent = os.path.join(
             resolve_results_artifact_path(self.artifact_root, "outputs", "rag_retrieved"),
             output_label,
             self.agent_name,
             f"k_{self.retrieve_num}",
-            self.sub_dataset,
+        )
+        return os.path.join(
+            parent,
+            existing_or_sanitized_component(parent, self.sub_dataset),
             run_scope,
             f"chunksize_{self.chunk_size}",
         )
@@ -1726,6 +1731,9 @@ class AgentWrapper:
 
         lightmem_model = (agent_config['model'] if agent_config.get("model_env")
                           else os.environ.get("LIGHTMEM_MODEL", agent_config['model']))
+        unified_variables = (["LIGHTMEM_MODEL"] if agent_config.get("model_env") else []) +             (["LIGHTMEM_EMBEDDING_MODEL"] if agent_config.get("embedding_model_env") else []) +             (["LIGHTMEM_EMBEDDING_DIMENSION"] if agent_config.get("embedding_dim_env") else [])
+        warn_ignored_env_overrides(
+            unified_variables, "the unified model profile (*_env fields) sets LightMem's models")
         lightmem_base_url = (
             agent_config.get('lightmem_base_url')
             or os.environ.get("LIGHTMEM_BASE_URL")
@@ -3488,7 +3496,7 @@ class AgentWrapper:
             "rag_retrieved",
             self.agent_name,
             f"k_{self.retrieve_num}",
-            self.sub_dataset,
+            sanitize_artifact_component(self.sub_dataset),
             f"chunksize_{self.chunk_size}",
             f"query_{query_id}_context_{context_id}.json",
         )
@@ -4010,12 +4018,11 @@ class AgentWrapper:
                     "or an explicit embedding_model override in the agent config."
                 )
 
-            save_dir = resolve_results_artifact_path(
-                self.artifact_root,
-                "outputs",
-                "rag_retrieved",
-                embedding_label,
-                self.sub_dataset,
+            embedding_root = resolve_results_artifact_path(
+                self.artifact_root, "outputs", "rag_retrieved", embedding_label)
+            save_dir = os.path.join(
+                embedding_root,
+                existing_or_sanitized_component(embedding_root, self.sub_dataset),
                 f"chunksize_{self.chunk_size}",
                 f"context_id_{context_id}",
             )

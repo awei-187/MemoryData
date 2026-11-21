@@ -105,7 +105,7 @@ API 使用同步 `retain`（`async: false`），每个 chunk 有独立文档 ID�
 
 默认保存前查询 `/stats?refresh=true`，检查待执行/执行中操作和待整合事实；后台失败或超时会阻止问答。若实验明确要求不等待，可设 `hindsight_wait_for_consolidation: false`，但应在实验说明中报告这种协议差异。服务端禁用自动整合而又存在待整合事实时，需先对齐服务端配置或显式选择不等待。
 
-历史有结构化时间时传给 retain；缺失时使用上游支持的 `timestamp: unset`。原始对话中的日期、角色和顺序仍保留在内容中。问题元数据提供 `question_date` 时传给 recall，其他情况使用服务原生行为；回答模板保持 MemoryData 原有时间提示规则。
+历史有结构化时间时传给 retain；缺失时使用上游支持的 `timestamp: unset`。原始对话中的日期、角色和顺序仍保留在内容中。问题元数据提供 `question_date` 时传给 recall（格式无法识别时记录一次警告并省略，不让该题失败），其他情况使用服务原生行为；回答模板保持 MemoryData 原有时间提示规则。
 
 ## 状态、恢复与清理
 

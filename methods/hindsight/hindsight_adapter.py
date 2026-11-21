@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -19,6 +20,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from utils.repo_paths import legacy_variants, portable
+
+logger = logging.getLogger(__name__)
 
 PROTOCOL = "memorydata_hindsight_retain_recall_v1"
 STATE_FILE = "hindsight_state.json"
@@ -49,6 +52,25 @@ def normalize_query_timestamp(value):
         return datetime.strptime(compact, '%Y/%m/%d %H:%M').isoformat()
     except ValueError as exc:
         raise ValueError('Unsupported Hindsight query_timestamp; expected ISO or YYYY/MM/DD (Day) HH:MM') from exc
+
+
+_WARNED_TIMESTAMPS = set()
+
+
+def query_timestamp_or_none(value):
+    """normalize_query_timestamp for retrieval: an unknown format must not fail the question.
+
+    The question is then answered without a time anchor, and the format is
+    reported once, so a new dataset's date field can be mapped explicitly.
+    """
+    try:
+        return normalize_query_timestamp(value)
+    except ValueError as exc:
+        key = repr(value)
+        if key not in _WARNED_TIMESTAMPS:
+            _WARNED_TIMESTAMPS.add(key)
+            logger.warning("Ignoring question date %s: %s", key, exc)
+        return None
 
 
 def _save(path, value):
@@ -304,7 +326,7 @@ class HindsightAdapter:
     def retrieve(self, query, *, query_timestamp=None):
         if not self.state.get("ready"):
             raise RuntimeError("Save the complete Hindsight history before querying")
-        query_timestamp = normalize_query_timestamp(query_timestamp)
+        query_timestamp = query_timestamp_or_none(query_timestamp)
         self.prepare()
         payload = {"query": query, "budget": self.budget, "max_tokens": self.max_tokens,
                    "types": self.types, "include": {"entities": None, "source_facts": {"max_tokens": self.max_tokens}}}

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from methods.hindsight.hindsight_adapter import normalize_query_timestamp
+from methods.hindsight.hindsight_adapter import query_timestamp_or_none
 from methods.worker_bridge import (BufferedWorkerAdapter, WorkerProcess, resolve_worker_python,
                                    worker_environment)
 from utils.repo_paths import portable
@@ -70,8 +70,11 @@ class RememAdapter(BufferedWorkerAdapter):
         self.top_k = int(agent_config.get("retrieve_num", 10))
         self.answer_mode = str(agent_config.get("remem_answer_mode", "memorydata"))
         self.timeout = float(agent_config.get("remem_worker_timeout_seconds", 7200))
-        if self.answer_mode not in ANSWER_MODES or self.top_k <= 0 or self.timeout <= 0:
-            raise ValueError("remem_answer_mode must be memorydata or native; retrieve_num and timeout must be positive")
+        # Added per history chunk to the index call's timeout (build_timeout()).
+        self.index_seconds_per_chunk = float(agent_config.get("remem_index_seconds_per_chunk", 300))
+        if (self.answer_mode not in ANSWER_MODES or self.top_k <= 0 or self.timeout <= 0
+                or self.index_seconds_per_chunk < 0):
+            raise ValueError("remem_answer_mode must be memorydata or native; retrieve_num and timeouts must be positive")
         dataset = {k: v for k, v in dataset_config.items() if k != "max_test_queries"}
         # The identity covers what determines the stored memory: native index
         # settings and models, data, history and the repository-relative state dir.
@@ -97,7 +100,7 @@ class RememAdapter(BufferedWorkerAdapter):
             return
         if not self.state["documents"]:
             raise RuntimeError("REMem received no history to index")
-        stats = self._worker().call("index")
+        stats = self._worker().call("index", timeout=self.build_timeout())
         self.indexed = True
         self.mark_ready(stats)
 
@@ -119,9 +122,9 @@ class RememAdapter(BufferedWorkerAdapter):
         self.require_ready()
         worker = self._worker()
         if not self.indexed:
-            worker.call("index")  # reopens the saved index; upstream skips re-extraction
+            worker.call("index", timeout=self.build_timeout())  # reopens the saved index; upstream skips re-extraction
             self.indexed = True
-        result = worker.call("query", query=query, question_date=normalize_query_timestamp(query_timestamp))
+        result = worker.call("query", query=query, question_date=query_timestamp_or_none(query_timestamp))
         passages = []
         for passage, docs in zip(result.get("passages") or [], result.get("source_docs") or []):
             text = str(passage.get("text") or "").strip()

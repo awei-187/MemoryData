@@ -29,7 +29,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
 1. 写入：每个 MemoryData chunk 经 `_prepare_memory_chunk_for_storage` 去掉 `LOCOMO_META` 包装后，追加到 `documents.jsonl`；来源 ID 和时间戳记在 `remem_state.json`。此时不调用模型。
 2. `save()`：启动 worker，把全部 chunk 作为 REMem 的 session 传给 `ReMem.index(docs)`（`extract_method=episodic_gist`），完成后检查图、verbatim、gist 均非空，再把清单标为 `ready`。
 3. 恢复：清单 `ready` 且 `native/remem_index/graph.pkl` 存在时复用；worker 用同一批文档再次调用 `index()`，上游发现图、嵌入和抽取结果都在，会跳过抽取。
-4. 查询：调用上游 `EpisodicGistStrategy._rag_each_query`（即 REMem-I 智能体），问题日期以 `{"date": question_date}` 传入（与上游 LongMemEval 脚本一致）。返回智能体答案和它访问过的全部段落（gist、事实、原文、实体）。
+4. 查询：调用上游 `EpisodicGistStrategy._rag_each_query`（即 REMem-I 智能体），问题日期以 `{"date": question_date}` 传入（与上游 LongMemEval 脚本一致）；格式无法识别时记录一次警告并按无日期作答，而不是让该题失败。返回智能体答案和它访问过的全部段落（gist、事实、原文、实体）。
 5. 回答：
    - `remem_answer_mode: memorydata`（默认）：智能体访问过的段落按访问顺序交给 MemoryData 的回答模型，用统一模板作答，与其他预设可比。注意智能体仍会完整运行，包括它自己的 `output_answer` 调用，只是该答案不被采用。
    - `remem_answer_mode: native`：直接采用 REMem 智能体的答案。该调用在 worker 内完成，`input_len` 只能按问题加段落的 token 数近似。
@@ -57,6 +57,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
 | `model_env` / `remem_llm_model` | 抽取、智能体和回答都用 `OPENAI_MODEL`（gpt-4o-mini） |
 | `embedding_model_env` / `remem_embedding_model` | `OPENAI_EMBEDDING_MODEL`（text-embedding-3-small，1536 维），经上游的 OpenAI 嵌入客户端调用 |
 | `remem_python` / `remem_python_env` | REMem 环境的解释器，默认 `D:/conda/envs/remem/python.exe`，可用 `REMEM_PYTHON` 覆盖 |
+| `remem_worker_timeout_seconds` / `remem_index_seconds_per_chunk` | 每次 worker 请求的超时（默认 7200 秒）；建索引（含复用时重新载入）的超时再加上每个 chunk 的额度（默认 300 秒），避免大规模历史被固定上限中断后反复重建 |
 | `remem_answer_mode` | `memorydata`（默认）或 `native` |
 | `remem_native_config` | 覆盖上游 `BaseConfig`。默认值取自作者 `examples/locomo.py`：`agent_max_steps 3`、`qa_top_k 10`、`linking_top_k 5`、`retrieval_top_k 200`、同义边阈值 0.8、DSPy 过滤提示 `filter_llama3.3-70B-Instruct.json` |
 | `retrieve_num` | 只用于输出命名和 recall@k 标注。REMem 的上下文规模由 `qa_top_k` 和 `agent_max_steps` 决定，不截断 |
@@ -86,7 +87,7 @@ D:\conda\envs\memorydata\python.exe main.py --agent_config config/topological_re
 - **只做过截断历史的冒烟测试**，见下文"真实 API 冒烟测试"，不能代表完整评测分数。
 - 模型：论文默认 GPT-4.1-mini + NV-Embed-v2（4096 维，本地 GPU）。这里按统一配置使用 gpt-4o-mini + text-embedding-3-small。上游代码本身支持这两个模型（gpt-4o-mini 也是上游 `BaseConfig` 的默认值），但结果不能视为论文设置的复现。
 - 输入粒度：上游 LoCoMo 脚本按原始 session 传入带说话人和日期的消息列表；这里每个 MemoryData chunk（`agent_chunk_size` 4096 token）是一个 session，说话人留在文本里。本分支的 chunk 一般没有单独的时间戳字段，日期只出现在正文里（如 LoCoMo 的 session 标题），由 REMem 的抽取 LLM 从文本中读取；只有带 `timestamp` 的结构化 chunk 才会在首行加日期。
-- 只支持整批建索引：所有 chunk 写完后在 `save()` 中一次 `index()`。上游在图已存在时会跳过索引，没有增量接口，因此 HaluMem 式"边写入边提问"（`prepare_for_queries`）未实现。要支持，需要在每批提问前用累积文档完整重建，代价很高。
+- 只支持整批建索引：所有 chunk 写完后在 `save()` 中一次 `index()`。上游在图已存在时会跳过索引，没有增量接口，因此 HaluMem 式"边写入边提问"（`prepare_for_queries`）未实现。要支持，需要在每批提问前用累积文档完整重建，代价很高。数据集配置带 `interleave_queries` 时，初始化即报错，不会先缓冲历史再在第一题失败。
 - 只接入论文方法 `episodic_gist` + 智能体；`openie`、`temporal` 等变体和 REMem-S 单步变体未接入（可通过 `agent_fixed_tools` 近似 REMem-S，但未验证）。
 - 上游 `semantic_retrieve` 会对事实文本调用 `eval()`。这是上游行为，在记忆内容来自可信基准数据时风险有限，接入其他数据时需要注意。
 - 中断的写入不续传：未到 `ready` 的状态在下次运行时整体丢弃重建。
