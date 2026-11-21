@@ -29,7 +29,13 @@ hindsight_recall_max_tokens: 4096
 hindsight_recall_types: [world, experience, observation]
 # Native bank overrides. Models/embeddings/reranker are configured server-side.
 hindsight_bank_config: {}
-agent_variant_tag: api-models-v1-hindsight-retain-recall
+# Retain each chunk with a timestamp from structured chunk times (HaluMem) or
+# in-text session/turn markers (LoCoMo, MemBench, LongMemEval); "unset" otherwise.
+hindsight_infer_timestamps: true
+# Prefix recalled memories with Hindsight's occurred/mentioned dates in the answer prompt.
+hindsight_recall_include_dates: true
+# New tag: banks and answers built before dated retain/recall stay separate.
+agent_variant_tag: api-models-v1-hindsight-retain-recall-dated
 
 # Used by scripts/run_hindsight_server.py. Credentials stay in the root .env.
 hindsight_source_path: E:/AML/hindsight

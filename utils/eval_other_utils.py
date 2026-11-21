@@ -896,6 +896,9 @@ def post_process(output, answer, dataset_config, eval_metadata=None):
         return _process_longmemeval_dataset(output, answer)
     elif 'locomo' in sub_dataset_name:
         return _process_locomo_qa_dataset(output, answer, eval_metadata)
+    elif 'halumem' in sub_dataset_name:
+        # Lexical scores are auxiliary; the HaluMem QA judge is the primary metric.
+        return default_post_process(output, answer)
     elif 'membench' in sub_dataset_name or str(dataset_config.get('dataset', '')).lower() == 'membench':
         return _process_membench_dataset(output, answer, eval_metadata)
     elif 'longbench' in sub_dataset_name or str(dataset_config.get('dataset', '')).lower() == 'longbench':

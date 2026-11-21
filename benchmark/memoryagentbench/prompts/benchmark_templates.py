@@ -1,3 +1,5 @@
+from evaluation.halumem.upstream_prompts import PROMPT_MEMZERO
+
 # System message used across all templates
 SYSTEM_MESSAGE = "You are a helpful assistant that can read the context and memorize it for future retrieval."
 
@@ -37,6 +39,11 @@ FACT_EXTRACTION_TEMPLATES = {
     "locomo_qa": (
         "You extract factual memories from benchmark dialogue history. "
         "Focus on user and assistant statements, preferences, commitments, temporal references, and dialogue facts needed for later questions.\n\n"
+        + FACT_EXTRACTION_SHARED_SUFFIX
+    ),
+    "halumem_qa": (
+        "You extract factual memories about the named user from a timestamped dialogue session between that user and an assistant. "
+        "Focus on the user's persona facts, events, relationships, preferences, plans, and changes to earlier facts; keep the user's name and the turn dates.\n\n"
         + FACT_EXTRACTION_SHARED_SUFFIX
     ),
     "eventqa": (
@@ -99,6 +106,8 @@ MEMORY_ANSWER_TEMPLATES = {
         "Retrieved memories:\n{memories}\n\n"
         "{question}\n\nAnswer:"
     ),
+    # Official HaluMem answer prompt (PROMPT_MEMZERO), placeholder renamed context -> memories.
+    "halumem_qa": PROMPT_MEMZERO.replace("{context}", "{memories}"),
     "eventqa": (
         "Based on the retrieved memories below, complete the task.\n\n"
         "Retrieved memories:\n{memories}\n\n"
@@ -186,6 +195,17 @@ BASE_TEMPLATES = {
             "agentic_memory_agent": "Search Archival Memory and answer the question as concisely as you can, using a single phrase if possible.\n\n {question} \n\n Answer:",
             "memos_agent": "Based on your stored memories of the conversation history, answer the question as concisely as you can, using a single phrase if possible.\n\n {question} \n\n Answer:",
             "memagent": "Based on the memorized conversation history, answer the question as concisely as you can, using a single phrase if possible.\n\n {question} \n\n Answer:",
+        },
+    },
+    "halumem_qa": {
+        "system": SYSTEM_MESSAGE,
+        "memorize": "Dialogue between User and Assistant \n<User> The following context is a timestamped conversation session between the user and the assistant: \n{context}\n <Assistant> I have memorized the conversation and I will answer the question you ask.",
+        "query": {
+            "long_context_agent": "The history chats are between you and a user. Based on the relevant chat history, answer the question as concisely as you can, using a single phrase if possible. If the history contains contradictory information, rely on the most recent.\n\n {question} \n\n Answer:",
+            "rag_agent": "The history chats are between you and a user. Based on the relevant chat history, answer the question as concisely as you can, using a single phrase if possible. If the history contains contradictory information, rely on the most recent.\n\n {question} \n\n Answer:",
+            "agentic_memory_agent": "Search Archival Memory and answer the question as concisely as you can, using a single phrase if possible.\n\n {question} \n\n Answer:",
+            "memos_agent": "Based on your stored memories of the conversation history, answer the question as concisely as you can, using a single phrase if possible. If the memories contain contradictory information, rely on the most recent.\n\n {question} \n\n Answer:",
+            "memagent": "Based on the memorized conversation history, answer the question as concisely as you can, using a single phrase if possible. If the history contains contradictory information, rely on the most recent.\n\n {question} \n\n Answer:",
         },
     },
     "eventqa": {
@@ -288,6 +308,7 @@ DATASET_MAPPING = {
     ("recsys_", "redial"): "recsys_redial",
     ("longmemeval_",): "longmemeval",
     ("locomo_",): "locomo_qa",
+    ("halumem_",): "halumem_qa",
     ("factconsolidation_",): "factconsolidation",
     ("detective_", "qa"): "detective_qa",
 }

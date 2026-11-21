@@ -111,6 +111,18 @@ def _build_zep_local_namespace(context_id, sub_dataset, namespace_prefix=""):
 
 
 
+def interleaved_query_unsupported_reason(agent_name):
+    """Why an agent cannot answer questions between history chunks, or None when it can."""
+    if "memo_rag" in str(agent_name):
+        return ("MemoRAG caches its memory on disk per context id only and would reload the "
+                "first segment's memory after later sessions are added")
+    lowered = str(agent_name).lower()
+    if "remem" in lowered or "tsm" in lowered:
+        return ("REMem and TSM build their index once from the complete history when the agent is "
+                "saved, so history added after a question point would never be indexed")
+    return None
+
+
 class AgentWrapper:
     """
     A wrapper class for different types of memory agents including:
@@ -1625,6 +1637,8 @@ class AgentWrapper:
         self.context = ""
         self.agent_start_time = time.time()
         self.hindsight = HindsightAdapter(agent_config, dataset_config, self.agent_save_to_folder)
+        from methods.hindsight.hindsight_adapter import ChunkTimeTracker
+        self._hindsight_time_tracker = ChunkTimeTracker()
         self.client = self._create_oai_client()
 
     def _initialize_simplemem_agent(self, agent_config, dataset_config):
@@ -3186,19 +3200,39 @@ class AgentWrapper:
             for chunk in context_chunks
         )
 
+    def resume_interleaved_hindsight(self, context_chunks, prefix_length):
+        """Continue an interleaved Hindsight context whose bank holds exactly context_chunks[:prefix_length]."""
+        prefix = context_chunks[:prefix_length]
+        stats = self.hindsight.resume_interleaved_prefix(self.hindsight_expected_documents(prefix))
+        if self.hindsight.infer_timestamps:
+            # Marker-based times carry over between chunks; replay them so the
+            # next retained chunk gets the same timestamp as in an unbroken run.
+            for chunk in prefix:
+                content = self._hindsight_retain_item(self._normalize_message_payload(chunk, memorizing=True))[0]
+                self._hindsight_time_tracker.timestamp_for(content)
+        return stats
+
     def _handle_hindsight_agent(self, message, memorizing, query_id, context_id):
         if memorizing:
             timestamp = getattr(self, "_hindsight_chunk_timestamp", None)
             if hasattr(timestamp, "isoformat"):
                 timestamp = timestamp.isoformat()
             content, source_ids = self._hindsight_retain_item(message)
+            if self.hindsight.infer_timestamps:
+                # Structured chunk times (HaluMem) win; otherwise use in-text
+                # session/turn markers (LoCoMo, MemBench, LongMemEval).
+                inferred = self._hindsight_time_tracker.timestamp_for(content)
+                timestamp = timestamp or inferred
             self.hindsight.add_chunk(content, source_ids=source_ids, timestamp=timestamp)
             return "Memorized"
 
         memory_time = time.time() - self.agent_start_time
         metadata = self._current_eval_metadata or {}
-        entries = self.hindsight.retrieve(message, query_timestamp=metadata.get("question_date"))
-        raw_contexts = [entry["text"] for entry in entries]
+        query_timestamp = metadata.get("question_date")
+        if not query_timestamp and self.hindsight.infer_timestamps:
+            query_timestamp = metadata.get("question_time")  # MemBench
+        entries = self.hindsight.retrieve(message, query_timestamp=query_timestamp)
+        raw_contexts = [entry["display_text"] for entry in entries]
         groups = [entry["source_ids"] for entry in entries]
         prompt_override = self.agent_config.get("hindsight_memory_answer_prompt")
         contexts = self._fit_memories_for_answer(message, raw_contexts, prompt_override=prompt_override)
@@ -3841,6 +3875,9 @@ class AgentWrapper:
             if self.context_len > self.input_length_limit:
                 self.chunks = self.chunks[1:]
                 self.context_len = self.context_len - self.chunk_size
+            # Indexes are built lazily per context_id; new history after a
+            # question (interleaved datasets) must trigger a rebuild.
+            self.context_id = -1
             return ''
         else:
             # Handle query processing for different RAG types
@@ -4410,6 +4447,28 @@ class AgentWrapper:
             "query_time_len": query_time_len,
             "retrieval_context": retrieval_context,
         }
+
+    def prepare_for_queries(self):
+        """Make history memorized so far answerable at an interleaved question point.
+
+        Unlike save_agent(), memorization continues afterwards. Agents that
+        store each chunk immediately need nothing; RAG indexes are invalidated
+        on every memorized chunk.
+        """
+        if self._is_agent_type("hindsight"):
+            self.hindsight.settle()
+        elif self._is_agent_type("simplemem"):
+            self.simplemem.flush_for_queries()
+        elif self._is_agent_type("memochat"):
+            self.memochat.save()
+        elif self._is_agent_type("letta"):
+            # Queries restore the runtime to the baseline written by save_agent().
+            self.save_agent()
+
+    def finish_query_batch(self):
+        """Undo per-question side effects before memorization resumes (interleaved datasets)."""
+        if self._is_agent_type("letta"):
+            self._reload_letta_query_runtime()
 
     def save_agent(self):
         """Save agent state to disk for persistence."""

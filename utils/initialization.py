@@ -8,7 +8,7 @@ import yaml
 import shutil
 from collections import defaultdict
 from utils.conversation_creator import ConversationCreator
-from utils.agent import AgentWrapper, _build_zep_local_namespace
+from utils.agent import AgentWrapper, _build_zep_local_namespace, interleaved_query_unsupported_reason
 from tqdm import tqdm
 from utils.eval_other_utils import metrics_summarization
 from utils.provider_utils import (
@@ -23,6 +23,8 @@ from utils.artifact_paths import (
     generate_memory_agent_base_path as _generate_memory_agent_base_path_with_root,
     generate_rag_agent_path as _generate_rag_agent_path_with_root,
     generate_agent_save_folder_path,
+    get_dataset_variant_components,
+    is_interleaved_dataset,
     rebase_legacy_artifact_path,
     resolve_artifact_root,
     sanitize_artifact_component,
@@ -683,6 +685,8 @@ def _normalize_config_values(raw_value):
 
 def _get_dataset_variant_components(dataset_config):
     """Return stable dataset-variant suffixes to prevent path collisions."""
+    if str(dataset_config.get("dataset", "")).lower() == "halumem":
+        return get_dataset_variant_components(dataset_config)
     if str(dataset_config.get("dataset", "")).lower() != "locomo":
         return []
 
@@ -846,6 +850,78 @@ def _generate_default_agent_path(agent_config, dataset_config, current_context_i
 # AGENT INITIALIZATION HELPERS
 # ============================================================================
 
+def create_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, current_context_index):
+    """Fresh agent for a session-interleaved context (HaluMem).
+
+    Questions are asked between history chunks, so a partially processed
+    context cannot be resumed from saved memory: its local and external state
+    is always reset and the whole history is rebuilt in order.
+    """
+    agent_name = str(agent_config.get("agent_name", ""))
+    unsupported = interleaved_query_unsupported_reason(agent_name)
+    if unsupported:
+        raise ValueError(f"{agent_name} cannot run interleaved (session-scheduled) questions: {unsupported}")
+    if "mem0" in agent_name.lower() and (
+        agent_config.get("mem0_checkpoint_enabled") or os.environ.get("MEMORYDATA_MEM0_CHECKPOINT_ENABLED") == "1"
+    ):
+        raise ValueError("Mem0 chunk checkpoints assume one ingestion pass; disable them for interleaved datasets")
+
+    _reset_external_persistent_state(agent_config, dataset_config, agent_save_folder, current_context_index)
+    if os.path.exists(agent_save_folder):
+        shutil.rmtree(agent_save_folder)
+    effective_agent_config = dict(agent_config)
+    if "hindsight" in agent_name.lower():
+        from methods.hindsight.hindsight_adapter import fingerprint
+        effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    return AgentWrapper(effective_agent_config, dataset_config, load_agent_from=agent_save_folder)
+
+
+def resume_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, resume_points):
+    """Reopen an unfinished interleaved Hindsight context instead of rebuilding it.
+
+    resume_points are the history prefix lengths at which the run may continue:
+    question points (and the end of history) no later than the earliest
+    unanswered question. When the saved bank holds exactly one of these
+    prefixes (a settle timeout or a failed question there), it is kept and
+    retain continues after it. Returns (agent, prefix_length) or None, in which
+    case the caller rebuilds the context from its first chunk.
+    """
+    agent_name = str(agent_config.get("agent_name", ""))
+    if "hindsight" not in agent_name.lower() or not os.path.exists(agent_save_folder):
+        return None
+    from methods.hindsight.hindsight_adapter import HindsightAdapter, fingerprint
+    state = HindsightAdapter.read_state(agent_save_folder)
+    if not state or state.get("ready") or not state.get("documents"):
+        return None
+    effective_agent_config = dict(agent_config)
+    effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    try:
+        agent = AgentWrapper(effective_agent_config, dataset_config, load_agent_from=agent_save_folder)
+    except ValueError as exc:  # different configuration/history: rebuild
+        logger.info("Not resuming interleaved Hindsight state in %s: %s", agent_save_folder, exc)
+        return None
+    for prefix_length in sorted(set(resume_points)):
+        if agent.hindsight_expected_documents(context_chunks[:prefix_length]) != state["documents"]:
+            continue
+        try:
+            agent.resume_interleaved_hindsight(context_chunks, prefix_length)
+        except ValueError as exc:
+            logger.info("Not resuming interleaved Hindsight state in %s: %s", agent_save_folder, exc)
+            return None
+        logger.info("Resuming interleaved Hindsight bank after %s retained chunks; waiting for consolidation "
+                    "again instead of retaining from the start", prefix_length)
+        return agent, prefix_length
+    return None
+
+
+def memorize_chunk_range(agent, context_chunks, current_context_index, total_contexts_count, start_chunk_index, end_chunk_index):
+    """Memorize context_chunks[start:end] in order (one segment of an interleaved context)."""
+    return _memorize_context_chunks(
+        agent, context_chunks, current_context_index, total_contexts_count,
+        start_chunk_index=start_chunk_index, end_chunk_index=end_chunk_index,
+    )
+
+
 def _memorize_context_chunks(
     agent,
     context_chunks,
@@ -855,13 +931,14 @@ def _memorize_context_chunks(
     checkpoint_interval=None,
     checkpoint_callback=None,
     mem0_checkpoint=None,
+    end_chunk_index=None,
 ):
     """Handle the memorization process for context chunks."""
     print("\n\n Agent Memorizing...\n\n")
     progress_description = f"Processing experiments {current_context_index + 1}/{total_contexts_count}"
     write_times = mem0_checkpoint.write_times if mem0_checkpoint else []
 
-    remaining_chunks = context_chunks[start_chunk_index:]
+    remaining_chunks = context_chunks[start_chunk_index:end_chunk_index]
     total_remaining_chunks = len(remaining_chunks)
 
     for processed_offset, chunk in enumerate(

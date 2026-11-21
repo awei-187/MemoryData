@@ -1,0 +1,19 @@
+# HaluMem-Long question answering (~1M tokens per user with distractors).
+# Data must be downloaded separately to datasets/HaluMem/HaluMem-Long.jsonl (see docs/halumem.md).
+dataset: HaluMem
+sub_dataset: halumem_long
+halumem_variant: long
+test_files: datasets/HaluMem/HaluMem-Long.jsonl
+chunk_size: 4096
+debug: false
+seed: 42
+
+interleave_queries: true
+
+context_max_length: 2000000
+generation_max_length: 512
+demo_files: ''
+use_chat_template: true
+max_test_samples: 20
+shots: 0
+tag: long

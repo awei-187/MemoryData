@@ -95,6 +95,8 @@ New-Item -ItemType File -Force -Path 'E:\MemoryData\results\hindsight_server\sto
 | `hindsight_settle_timeout_seconds` | 默认 300 秒，等待整合的截止时间；超时后重跑同一命令会继续等待，可调大此值 |
 | `hindsight_legacy_identity_params` | 可选，仅用于复用 2026-11-19 前保存、且当时检索/等待参数与当前不同的 bank，见下文 |
 | `hindsight_bank_config` | 创建 bank 时传给原生 API 的可选 bank 设置，默认 `{}`，使用服务端默认值 |
+| `hindsight_infer_timestamps` | 预设为 `true`：从结构化字段或文本时间标记给 retain 提供时间戳，见下文“时间戳” |
+| `hindsight_recall_include_dates` | 预设为 `true`：召回记忆在回答提示中带上发生/提及日期 |
 | `hindsight_memory_answer_prompt` | 可选，覆盖原有统一回答模板 |
 | `hindsight_llm_model` | 原生引擎的抽取模型，默认 `gpt-4o-mini` |
 | `hindsight_embeddings_model` / `hindsight_embeddings_dimensions` | 默认 `text-embedding-3-small` / 1536 |
@@ -105,7 +107,21 @@ API 使用同步 `retain`（`async: false`），每个 chunk 有独立文档 ID�
 
 默认保存前查询 `/stats?refresh=true`，检查待执行/执行中操作和待整合事实；后台失败或超时会阻止问答。若实验明确要求不等待，可设 `hindsight_wait_for_consolidation: false`，但应在实验说明中报告这种协议差异。服务端禁用自动整合而又存在待整合事实时，需先对齐服务端配置或显式选择不等待。
 
-历史有结构化时间时传给 retain；缺失时使用上游支持的 `timestamp: unset`。原始对话中的日期、角色和顺序仍保留在内容中。问题元数据提供 `question_date` 时传给 recall，其他情况使用服务原生行为；回答模板保持 MemoryData 原有时间提示规则。
+**时间戳**（`hindsight_infer_timestamps`、`hindsight_recall_include_dates`；代码默认关闭，`config/hybrid_hindsight.yaml` 已开启）：
+
+| 数据集 | retain 时间来源 | recall 的 `query_timestamp` |
+| --- | --- | --- |
+| HaluMem | 加载器给出的每块首轮时间（结构化字段，始终优先） | 题目所在 session 的结束时间 |
+| LoCoMo | 文本中的 session 头 `Session N (1:56 pm on 8 May, 2023)` | 无（数据没有提问时间，使用服务原生行为） |
+| MemBench | 文本中的轮次头 `[time: '2024-10-01 08:00' ...]` | `question_time`，如 `'2024-10-04 08:49' Friday` |
+| MemoryAgentBench LongMemEval | 文本中的 `Chat Time: 2022/11/17 (Thu) 12:04` | `question_date` |
+| EventQA、Banking77、FactConsolidation、LongBench | 无时间，`timestamp: unset` | 无 |
+
+- 一个块取其第一个时间标记；若块从 session 中间开始（首个标记前已有正文）或块内没有标记，就沿用之前最近的时间。时间不加时区，原始对话中的日期、角色和顺序仍保留在内容中。
+- 已用真实数据核对：LoCoMo 首组 18 块、MemBench 三个切片共 523 块、LongMemEval 88 块推断出的时间，与各自所属 session 或轮次的原始时间全部一致；无时间的四个数据集均未误识别出时间。
+- 开启 `hindsight_recall_include_dates` 后，召回的记忆在回答提示中显示为 `[occurred: 开始 to 结束; mentioned: 提及时间] 记忆正文`；服务端没有返回日期时只显示正文。
+- 开启 `hindsight_infer_timestamps` 会进入记忆库身份指纹：不带时间写入的旧 bank 不会被复用。`hybrid_hindsight.yaml` 同时改用新的 `agent_variant_tag`（`api-models-v1-hindsight-retain-recall-dated`），新的 bank 和回答与此前结果分开存放。此前结果对应的配置（未设置这两个开关）行为不变，仍可复现。
+- 回答模板保持 MemoryData 原有时间提示规则。
 
 ## 状态、恢复与清理
 
@@ -114,6 +130,7 @@ API 使用同步 `retain`（`async: false`），每个 chunk 有独立文档 ID�
 - 完整历史与设置兼容时恢复原 bank；恢复前检查远端 bank 是否存在，缺失时要求 `--force`。
 - 中途写入失败的状态不用于问答，下次会清理该单元记录的 bank 并重建整段历史。
 - **整合超时不重写**：若全部 chunk 已确认写入、只是等待后台整合超时，重跑同一命令时会核对本地文档 ID/来源映射与当前完整历史一致、远端文档数一致且无失败操作，然后只继续等待整合，不删除 bank、不重新 retain。可同时调大 `hindsight_settle_timeout_seconds`。后台操作失败或文档数不符时仍拒绝，需要 `--force`。MemBench 的写入耗时在等待整合前已保存，续等后照常报告。
+- **交错提问（HaluMem）同样不重写**：提问点 `settle()` 超时后重跑，若本地文档映射恰好等于某个提问点之前的历史、远端文档数一致、无失败操作，且没有更早的未答题，就保留 bank、再次等待整合，然后从该提问点继续写入。否则整体重建。详见 [halumem.md](halumem.md)。
 - **身份指纹只覆盖记忆内容**：服务地址、bank 设置、数据集配置、完整历史、状态目录和是否等待整合。`retrieve_num`、`hindsight_recall_*` 只在检索时生效，`hindsight_settle_timeout_seconds` 只是等待时长，修改它们会直接复用原 bank，便于做检索预算消融。修改等待开关、bank 设置或历史仍会被拒绝。
 - `--force` 在删除本地状态前清理该单元记录的 UUID bank，不清空整个 Hindsight 服务，也不触碰其他用户 bank。
 - 本地清单包含配置/历史指纹，不保存 API Key。配置或历史不兼容时拒绝复用。Endpoint 变化时不猜测旧 bank 所属服务，需使用旧配置清理，或改用新的 artifact 根目录。

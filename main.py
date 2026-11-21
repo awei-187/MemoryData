@@ -14,8 +14,12 @@ from utils.initialization import (
     load_existing_results, 
     create_agent_and_fetch_data, 
     setup_configs_and_directories, 
-    generate_agent_save_folder, 
-    initialize_and_memorize_agent
+    generate_agent_save_folder,
+    initialize_and_memorize_agent,
+    create_interleaved_agent,
+    resume_interleaved_agent,
+    memorize_chunk_range,
+    is_interleaved_dataset,
 )
 from tqdm import tqdm
 from collections import defaultdict
@@ -610,6 +614,12 @@ def process_context(context_index, context_chunks, query_answer_pairs, agent_con
                    metrics, results, query_index, completed_context_ids, skipped_query_ids,
                    max_queries, output_path, time_cost_list, start_time, force_rerun, total_contexts):
     """Process a single context and its queries."""
+    if is_interleaved_dataset(dataset_config):
+        return process_context_interleaved(
+            context_index, context_chunks, query_answer_pairs, agent_config, dataset_config,
+            metrics, results, query_index, completed_context_ids, skipped_query_ids,
+            max_queries, output_path, time_cost_list, start_time, force_rerun, total_contexts,
+        )
     # Skip contexts that have already been fully processed
     if should_skip_context(force_rerun, context_index, completed_context_ids):
         logger.info(f"\n\n!!!!!Experiment {context_index} already finished, skipping...\n")
@@ -640,6 +650,78 @@ def process_context(context_index, context_chunks, query_answer_pairs, agent_con
     )
     
     return metrics, results, query_index, False
+
+
+def group_queries_by_ask_point(query_answer_pairs, first_query_index):
+    """Group consecutive questions by the history prefix they need: [(ask_after_chunk, start_index, pairs)]."""
+    groups = []
+    previous = 0
+    for offset, query_data in enumerate(query_answer_pairs):
+        eval_metadata = unpack_query_data(query_data)[3] or {}
+        ask_after_chunk = eval_metadata.get("ask_after_chunk")
+        if not isinstance(ask_after_chunk, int) or ask_after_chunk < previous:
+            raise ValueError("Interleaved datasets need non-decreasing integer eval_metadata.ask_after_chunk per question")
+        previous = ask_after_chunk
+        if groups and groups[-1][0] == ask_after_chunk:
+            groups[-1][2].append(query_data)
+        else:
+            groups.append((ask_after_chunk, first_query_index + offset, [query_data]))
+    return groups
+
+
+def process_context_interleaved(context_index, context_chunks, query_answer_pairs, agent_config, dataset_config,
+                                metrics, results, query_index, completed_context_ids, skipped_query_ids,
+                                max_queries, output_path, time_cost_list, start_time, force_rerun, total_contexts):
+    """Memorize history up to each question's session, ask it, then continue (HaluMem protocol).
+
+    An unfinished context is rebuilt from its first chunk; questions already
+    answered are kept and skipped, since they saw the same history prefix.
+    Hindsight is the exception: a bank holding exactly the history up to the
+    earliest unanswered question (a settle timeout there) is resumed instead.
+    """
+    if should_skip_context(force_rerun, context_index, completed_context_ids):
+        logger.info(f"\n\n!!!!!Experiment {context_index} already finished, skipping...\n")
+        return metrics, results, query_index + len(query_answer_pairs), False
+    if has_reached_query_limit(max_queries, query_index):
+        return metrics, results, query_index, True
+
+    groups = group_queries_by_ask_point(query_answer_pairs, query_index)
+    if groups and groups[-1][0] > len(context_chunks):
+        raise ValueError("A question is scheduled after more history chunks than the context has")
+    agent_save_folder = generate_agent_save_folder(agent_config, dataset_config, context_index)
+    resumed = None
+    if not force_rerun:
+        # Memory may already hold history up to the earliest unanswered question
+        # (e.g. Hindsight timed out settling there): continue from that prefix.
+        pending = [ask for ask, start, group in groups for i in range(len(group))
+                   if not should_skip_query(start + i, skipped_query_ids)]
+        limit = min(pending) if pending else len(context_chunks)
+        resume_points = [ask for ask, _, _ in groups if ask <= limit] + ([len(context_chunks)] if not pending else [])
+        resumed = resume_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, resume_points)
+    if resumed:
+        agent, memorized = resumed
+    else:
+        agent = create_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, context_index)
+        memorized = 0
+    for ask_after_chunk, group_start_index, group in groups:
+        if has_reached_query_limit(max_queries, group_start_index):
+            return metrics, results, group_start_index, True
+        if all(should_skip_query(group_start_index + i, skipped_query_ids) for i in range(len(group))):
+            continue
+        memorize_chunk_range(agent, context_chunks, context_index, total_contexts, memorized, ask_after_chunk)
+        memorized = ask_after_chunk
+        agent.prepare_for_queries()
+        metrics, results, next_index = process_queries_for_context(
+            agent, group, dataset_config, metrics, results,
+            group_start_index, context_index, skipped_query_ids, max_queries,
+            agent_config, output_path, time_cost_list, start_time,
+        )
+        if next_index < group_start_index + len(group):
+            return metrics, results, next_index, True
+        agent.finish_query_batch()
+    memorize_chunk_range(agent, context_chunks, context_index, total_contexts, memorized, len(context_chunks))
+    agent.save_agent()
+    return metrics, results, query_index + len(query_answer_pairs), False
 
 
 def _attach_membench_native_rtwt_to_output(
@@ -873,6 +955,11 @@ def main():
 
 def _maybe_generate_post_run_reports(output_path, dataset_config):
     """Generate supplementary evaluation reports for datasets that support them."""
+    if str(dataset_config.get("dataset", "")).lower() == "halumem":
+        # The judge model (default gpt-4o) is billed separately, so it is never run implicitly.
+        logger.info("HaluMem QA judge is a separate step: python -m evaluation.halumem.evaluate_halumem_judge \"%s\"",
+                    output_path)
+        return
     try:
         from evaluation.longmemeval.memoryagentbench_longmemeval_recall import (
             generate_memoryagentbench_longmemeval_recall_report,
