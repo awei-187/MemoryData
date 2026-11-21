@@ -73,7 +73,7 @@ main.py
 
 | 文件 | 作用 |
 | --- | --- |
-| `methods/worker_bridge.py` | 父进程侧：`WorkerProcess`（`<python> -I -u worker.py`，JSON lines 请求/应答，超时，stderr 写 `worker.log`）、`worker_environment`（只经环境变量传密钥）、`close_all_workers`（新 context 开始和 `--force` 前关闭旧进程，Windows 下运行中的进程会锁住工作目录）、`BufferedWorkerAdapter`（状态清单、身份指纹、文档缓冲、未完成写入整体重建） |
+| `methods/worker_bridge.py` | 父进程侧：`WorkerProcess`（`<python> -I -X utf8 -u worker.py`，JSON lines 请求/应答，超时，stderr 写 `worker.log`）、`worker_environment`（只经环境变量传密钥）、`close_all_workers`（新 context 开始和 `--force` 前关闭旧进程，Windows 下运行中的进程会锁住工作目录；worker 退出前结束自己的 multiprocessing 子进程，强制结束时连同进程树）、`BufferedWorkerAdapter`（状态清单、身份指纹、文档缓冲、未完成写入整体重建） |
 | `methods/worker_protocol.py` | 子进程侧，仅用标准库：保留原 stdout 作协议通道，把文件描述符 1 重定向到 stderr，防止原生代码的 `print` 破坏协议 |
 | `methods/worker_agent_support.py` | `AgentWrapper` 的初始化、写入、检索和回答逻辑，`utils/agent.py` 里只加分派 |
 | `methods/<方法>/<方法>_worker.py` | 在方法自己的环境中运行，导入未修改的上游代码；胶水代码集中于此 |

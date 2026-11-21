@@ -1,6 +1,6 @@
 """TSM worker: runs inside the TSM conda environment, never inside MemoryData's.
 
-Started by ``methods/tsm/tsm_adapter.py`` as ``<tsm python> -I -u tsm_worker.py``
+Started by ``methods/tsm/tsm_adapter.py`` as ``<tsm python> -I -X utf8 -u tsm_worker.py``
 with the per-context native directory as working directory. It imports the
 unmodified release in ``methods/tsm/source/TSM-main`` and drives the same
 functions as its ``main_time.py`` pipeline for one data piece:

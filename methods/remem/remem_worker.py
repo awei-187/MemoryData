@@ -1,6 +1,6 @@
 """REMem worker: runs inside the REMem conda environment, never inside MemoryData's.
 
-Started by ``methods/remem/remem_adapter.py`` as ``<remem python> -I -u remem_worker.py``
+Started by ``methods/remem/remem_adapter.py`` as ``<remem python> -I -X utf8 -u remem_worker.py``
 with the per-context native directory as working directory. It imports the
 unmodified upstream package from ``methods/remem/source/REMem-main/src`` and
 exposes four operations: ``open``, ``index``, ``query`` and ``stats``.

@@ -19,7 +19,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
   native/（上游索引文件，由 worker 写入）
 ```
 
-- worker 用 `<remem python> -I -u remem_worker.py` 启动，工作目录是该 context 的 `native/`；`-I` 保证 `PYTHONPATH` 和脚本目录不会混入。
+- worker 用 `<remem python> -I -X utf8 -u remem_worker.py` 启动，工作目录是该 context 的 `native/`；`-I` 保证 `PYTHONPATH` 和脚本目录不会混入，`-I` 同时忽略 `PYTHONIOENCODING`，因此用 `-X utf8` 让标准输出使用 UTF-8。
 - 密钥只通过子进程环境变量传入（`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`MEMORYDATA_EMBEDDING_*`），不进入请求、清单或结果。上游自带的 LLM/嵌入缓存（`native/outputs/memorydata/*.sqlite`）只存响应，不存密钥。
 - 上游代码打印到 stdout 的内容被重定向到 `<context>/worker.log`，不影响协议。
 - 只走在线 API 路径，不导入 vllm、transformers、sentence_transformers、dspy。环境依赖见 `methods/remem/requirements-remem.txt`。
