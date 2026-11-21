@@ -119,6 +119,11 @@ def split_evidence(evidence, leaf_texts):
     return [t for t in leaf_texts if t.strip()], summary
 
 
+# Runtime patches applied by tsm_worker.py to release 0.1.1 (docs/tsm.md). Part of
+# the identity, so an index built without them is never reused as a patched one.
+RELEASE_PATCHES = ("dense-index-event-loop", "tree-leaves-all-chunks")
+
+
 class TsmAdapter(BufferedWorkerAdapter):
     PROTOCOL = "memorydata_tsm_worker_v1"
     STATE_FILE = "tsm_state.json"
@@ -136,7 +141,7 @@ class TsmAdapter(BufferedWorkerAdapter):
         dataset = {k: v for k, v in dataset_config.items() if k != "max_test_queries"}
         build_config = {k: v for k, v in self.config.items() if k != "retriever"}
         super().__init__(agent_config, state_dir, {
-            "native": build_config, "dataset": portable(dataset),
+            "native": build_config, "release_patches": list(RELEASE_PATCHES), "dataset": portable(dataset),
             "history": agent_config.get("_memory_history_fingerprint"),
             "state_dir": portable(str(Path(state_dir).resolve())),
         }, worker_factory=worker_factory, extra_state={"group_id": "md_tsm_" + uuid.uuid4().hex,

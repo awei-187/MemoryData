@@ -166,6 +166,11 @@ class AdapterTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, message):
                 self.adapter(dict(self.config, **change))
 
+    def test_release_patches_are_part_of_the_identity(self):
+        patched = self.adapter().identity
+        with patch("methods.tsm.tsm_adapter.RELEASE_PATCHES", ()):
+            self.assertNotEqual(self.adapter().identity, patched)  # same state dir: only the patches differ
+
     def test_graphiti_concurrency_reaches_only_the_worker_environment(self):
         started = []
         fake_process = lambda python, script, **kwargs: started.append(kwargs["env"])
@@ -209,6 +214,57 @@ class WorkerGlueTests(unittest.TestCase):
         self.assertEqual(build(config=config, cache=False), {"config": config, "cache": False})
         self.assertFalse(self.worker.is_reasoning_model("gpt-4.1-nano"))
         self.assertTrue(self.worker.is_reasoning_model("o3-mini"))
+
+    def test_dense_index_bridge_runs_outside_the_callers_event_loop(self):
+        import asyncio
+
+        def release_bridge(batch):  # what embed_documents_batch does with its own loop
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(asyncio.sleep(0, result=[len(text) for text in batch]))
+            finally:
+                loop.close()
+
+        async def inside_parallel_build_extract():
+            with self.assertRaisesRegex(RuntimeError, "another loop is running"):
+                release_bridge(["ab"])
+            return self.worker.outside_running_loop(release_bridge)(["ab", "c"])
+
+        self.assertEqual(asyncio.run(inside_parallel_build_extract()), [2, 1])
+        self.assertEqual(self.worker.outside_running_loop(release_bridge)(["abc"]), [3])
+
+    def test_leaves_cover_every_history_chunk_instead_of_the_last_window(self):
+        # What the release leaves behind: each month numbered from leaf_0, the last one wins.
+        overwritten = {"leaf_0": {"text": "march turn", "children": None, "parent": None}, "root": {"text": "r"}}
+        chunks = ["jan turn", "feb turn", "march turn"]
+        rebuilt = self.worker.rebuild_leaves(overwritten, chunks,
+                                             [{"full_text": "jan full"}, "feb turn", {"user_only_text": "x"}])
+        self.assertEqual({k: v["text"] for k, v in rebuilt.items()},
+                         {"root": "r", "leaf_0": "jan full", "leaf_1": "feb turn", "leaf_2": "march turn"})
+        with tempfile.TemporaryDirectory() as folder:
+            build = self.worker.leaves_for_all_chunks(lambda **kwargs: (dict(overwritten), 1.5, {"Alice": ["u"]}))
+            cache, cost, index = build(text_chunks=chunks, cache_folder=folder)
+            self.assertEqual(sorted(cache), ["leaf_0", "leaf_1", "leaf_2", "root"])
+            self.assertEqual((cost, index), (1.5, {"Alice": ["u"]}))
+            self.assertEqual(json.loads((Path(folder) / "tree.json").read_text(encoding="utf-8")), cache)
+            self.assertEqual(build(text_chunks=chunks, cache_folder=folder, snapshots_only=True)[0], overwritten)
+
+    def test_zero_vector_or_short_dense_index_is_rejected(self):
+        import numpy as np
+
+        class Index:
+            def __init__(self, vectors):
+                self.vectors = np.asarray(vectors, dtype="float32")
+                self.ntotal = len(self.vectors)
+
+            def reconstruct_n(self, start, count):
+                return self.vectors[start:start + count]
+
+        retriever = lambda vectors: type("Dense", (), {"faiss_index": Index(vectors)})()
+        self.assertIsNone(self.worker.dense_index_problem(retriever([[0.1, 0.2], [0.0, 0.3]]), 2))
+        self.assertIn("1 of 2 vectors are all zero", self.worker.dense_index_problem(retriever([[0.1, 0.2], [0, 0]]), 2))
+        self.assertIn("1 vectors for 3 leaves", self.worker.dense_index_problem(retriever([[0.1, 0.2]]), 3))
+        self.assertEqual(self.worker.dense_index_problem(object(), 1), "no FAISS index")
 
     def test_query_passes_question_date_and_reports_observed_leaves(self):
         service = self.worker.TsmService(source_dir=ROOT)

@@ -88,6 +88,80 @@ def client_without_reasoning(factory):
     return build
 
 
+def outside_running_loop(func):
+    """Run ``func`` in a fresh thread when the caller is inside a running event loop.
+
+    TSM's build_dense_index.embed_documents_batch bridges the async embedder with
+    new_event_loop().run_until_complete(), but parallel_build_extract calls it from
+    inside asyncio.run(); every batch then fails ("Cannot run the event loop while
+    another loop is running") and is silently replaced by zero vectors. The same
+    function with the same arguments runs unchanged in a thread without a loop,
+    which is how graphiti_extractor._run_coroutine handles the same situation.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return func(*args, **kwargs)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(func, *args, **kwargs).result()
+
+    run._memorydata_compat = True
+    return run
+
+
+def rebuild_leaves(cache, text_chunks, original_text=None):
+    """One ``leaf_<i>`` per input chunk, as the non-temporal build_tree_clustering.py does.
+
+    The temporal build_tree_clustering_time.py rebinds ``text_chunks`` to each
+    month's episode contents and numbers every window's leaves from leaf_0, so
+    ``all_caches.update`` keeps only the last window's leaves. Leaf texts follow
+    that file's own rule (``full_text`` when ``original_text`` holds turn dicts).
+    """
+    rebuilt = {key: value for key, value in (cache or {}).items() if not str(key).startswith("leaf_")}
+    for position, chunk in enumerate(text_chunks or []):
+        text = chunk
+        if original_text and position < len(original_text):
+            original = original_text[position]
+            if isinstance(original, dict) and "full_text" in original:
+                text = original["full_text"]
+        rebuilt[f"leaf_{position}"] = {"text": text, "children": None, "parent": None}
+    return rebuilt
+
+
+def leaves_for_all_chunks(build):
+    """Wrap build_tree_with_clustering_sync: keep its snapshots and index, rebuild the leaves."""
+
+    def run(*args, **kwargs):
+        cache, cost, cluster_index = build(*args, **kwargs)
+        if kwargs.get("snapshots_only"):
+            return cache, cost, cluster_index
+        cache = rebuild_leaves(cache, kwargs["text_chunks"], kwargs.get("original_text"))
+        tree_path = Path(kwargs["cache_folder"]) / "tree.json"
+        tree_path.write_text(json.dumps(cache, ensure_ascii=False, indent=4), encoding="utf-8")
+        return cache, cost, cluster_index
+
+    run._memorydata_compat = True
+    return run
+
+
+def dense_index_problem(dense_retriever, leaf_count):
+    """Upstream logs embedding failures and stores zero vectors; refuse such an index."""
+    index = getattr(dense_retriever, "faiss_index", None)
+    if index is None:
+        return "no FAISS index"
+    if int(index.ntotal) != int(leaf_count):
+        return f"{index.ntotal} vectors for {leaf_count} leaves"
+    import numpy as np
+
+    vectors = np.asarray(index.reconstruct_n(0, index.ntotal))
+    zero = int((np.abs(vectors).sum(axis=1) == 0).sum()) if len(vectors) else 0
+    return f"{zero} of {len(vectors)} vectors are all zero (embedding failed)" if zero else None
+
+
 class TsmService:
     def __init__(self, source_dir=None):
         self.source_dir = Path(source_dir or os.environ.get("TSM_SOURCE_DIR") or DEFAULT_SOURCE).resolve()
@@ -114,6 +188,7 @@ class TsmService:
             self._graphiti_config_compat()
             self._graphiti_episode_compat()
             self._graphiti_reasoning_compat()
+            self._release_defect_patches()
             self.main = main_time
         return self.main
 
@@ -176,6 +251,19 @@ class TsmService:
             return
         graphiti_extractor.OpenAIClient = client_without_reasoning(factory)
 
+    @staticmethod
+    def _release_defect_patches():
+        """Two logic defects of release 0.1.1 (see docs/tsm.md); upstream files stay unchanged."""
+        import build_dense_index
+        import build_tree_clustering_time
+
+        if not getattr(build_dense_index.embed_documents_batch, "_memorydata_compat", False):
+            build_dense_index.embed_documents_batch = outside_running_loop(build_dense_index.embed_documents_batch)
+        # main_time imports this name inside the function body at call time.
+        if not getattr(build_tree_clustering_time.build_tree_with_clustering_sync, "_memorydata_compat", False):
+            build_tree_clustering_time.build_tree_with_clustering_sync = leaves_for_all_chunks(
+                build_tree_clustering_time.build_tree_with_clustering_sync)
+
     def open(self, args):
         main = self._import_native()
         self.bundle = main.extract_config_bundle(args["config"])
@@ -228,6 +316,15 @@ class TsmService:
         dense_wanted = self.bundle.retriever_kwargs.get("enable_dense_retrieval", False)
         if missing or not stats["tree_nodes"] or (dense_wanted and not stats["dense_retriever"]):
             raise RuntimeError(f"TSM build is incomplete: missing={missing}, stats={stats}")
+        tree = getattr(self.retriever, "cache_tree", {}) or {}
+        stats["leaves"] = sum(1 for key in tree if str(key).startswith("leaf_"))
+        if stats["leaves"] != len(self.turns):
+            raise RuntimeError(f"TSM tree has {stats['leaves']} leaves for {len(self.turns)} history chunks")
+        if dense_wanted:
+            dense = self.retriever.dense_retriever
+            problem = dense_index_problem(dense, len(getattr(dense, "collapse_tree_ids", None) or tree))
+            if problem:
+                raise RuntimeError(f"TSM dense index is unusable: {problem}")
         return stats
 
     def query(self, args):

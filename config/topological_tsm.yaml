@@ -43,7 +43,8 @@ tsm_native_config: {}
 tsm_llm_model: gpt-4o-mini
 tsm_embedding_model: text-embedding-3-small
 tsm_embedding_dimensions: 1536
-agent_variant_tag: api-models-v1-tsm-release-0.1.1
+# mdpatch1: release 0.1.1 plus MemoryData's fixes of two release defects (docs/tsm.md).
+agent_variant_tag: api-models-v1-tsm-release-0.1.1-mdpatch1
 
 api_only: true
 embedding_model: text-embedding-3-small
