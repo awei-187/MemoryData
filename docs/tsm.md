@@ -66,7 +66,7 @@ TsmAdapter ──JSON lines（stdin/stdout）──> methods/tsm/tsm_worker.py
 TSM 环境已于 2026-11-20 创建（Python 3.11，graphiti-core 0.19.0、neo4j 5.28.1、spacy 3.8.4、faiss-cpu 1.9.0.post1、openai 2.24.0、numpy 1.26.4，`pip check` 无冲突）。在其他机器上重建：
 
 ```powershell
-C:\Users\wjp\anaconda3\Scripts\conda.exe create -y -p D:\conda\envs\tsm python=3.11
+conda create -y -p D:\conda\envs\tsm python=3.11
 ```
 
 ```powershell
