@@ -3,7 +3,7 @@
 ## 来源与可信度
 
 - 论文：Beyond Dialogue Time: Temporal Semantic Memory for Personalized LLM Agents，Miao Su 等 11 人，Findings of ACL 2026，arXiv 2601.07468。
-- 代码：[cosmicexotic/TSM](https://github.com/cosmicexotic/TSM)，版本 0.1.1。**这不是论文确认的官方实现**：论文、arXiv 和 ACL Anthology 都没有链接任何代码。采用它的依据是：账号显示为第一作者 Miao Su（中科院计算所），README 引用该论文，`pyproject.toml` 的作者列表与论文一致。该仓库 README 自述"未做过真实 API 基准运行，不声称任何分数"。按用户确认，以此仓库作为 TSM 实现。
+- 代码：[cosmicexotic/TSM](https://github.com/cosmicexotic/TSM)，版本 0.1.1。论文 arXiv v2（2026-09-02 修订）正文摘要末尾写明 "Code is available at https://github.com/cosmicexotic/TSM"，因此这是作者公开的实现；v1（2026-01-12）、arXiv 摘要元数据和 ACL Anthology 页面没有代码链接。仓库于 2026-09-01 新建，只有 3 个提交（v0.1.0、当天被取代的依赖修复 v0.1.1、补引用），README 说明它是不带开发仓库 Git 历史的新仓库，且"未做过真实 API 基准运行，不声称任何分数"；论文分数来自作者未公开的内部开发代码与内部后端（REPRODUCIBILITY.md）。
 - 许可证：MIT（派生自 MIT 许可的 YiboZhao624/E-2GraphRAG；依赖 Apache-2.0 的 Graphiti，见其 `NOTICE`、`GRAPHITI_LICENSE`）。
 - 本地副本：`methods/tsm/source/TSM-main`，来自 main 分支 zip（SHA-256 `66ba29ba2b45ca2f09b59b8f00501bcd04547d331935a465a77d1673cd004c97`，2026-11-20 下载）。该目录由 `methods/tsm/.gitignore` 排除，不提交。上游代码未做任何修改。
 
