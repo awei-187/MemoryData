@@ -1,0 +1,10 @@
+HaluMem (MemTensor/HaluMem)
+https://github.com/MemTensor/HaluMem
+Dataset: https://huggingface.co/datasets/IAAR-Shanghai/HaluMem
+Paper: HaluMem: Evaluating Hallucinations in Memory Systems of Agents (arXiv:2511.03506)
+
+upstream_prompts.py contains EVALUATION_PROMPT_FOR_QUESTION (eval/eval_tools.py)
+and PROMPT_MEMZERO (eval/prompts.py), copied verbatim from upstream commit
+d653749586bfc7d13f5b68e8851f52155b5b1650. The HaluMem repository and dataset are
+distributed under CC BY-NC-ND 4.0; use is limited to non-commercial research
+with attribution. The dataset itself is not committed to this repository.

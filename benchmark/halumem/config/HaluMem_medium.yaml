@@ -1,0 +1,20 @@
+# HaluMem-Medium question answering, official session-interleaved protocol.
+# Data: datasets/HaluMem/HaluMem-Medium.jsonl (20 users, 1,387 sessions, 3,467 questions).
+dataset: HaluMem
+sub_dataset: halumem_medium
+halumem_variant: medium
+test_files: datasets/HaluMem/HaluMem-Medium.jsonl
+chunk_size: 4096
+debug: false
+seed: 42
+
+# Ask each session's questions right after that session is memorized.
+interleave_queries: true
+
+context_max_length: 2000000
+generation_max_length: 512
+demo_files: ''
+use_chat_template: true
+max_test_samples: 20
+shots: 0
+tag: medium

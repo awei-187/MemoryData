@@ -152,6 +152,7 @@ conda activate memory-bench
 | LoCoMo | `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` | JSON 文件 | 供完整版及按类别的 LoCoMo 预设使用 |
 | LongBench | `datasets/longBench_rep150_proportional/datasets` | HuggingFace `save_to_disk` 目录 | 对应按比例采样的子集 |
 | MemBench | `datasets/MemBench/MemData/FirstAgent/*.json` | JSON 文件 | `simple`、`noisy`、`knowledge_update`、`highlevel`、`RecMultiSession` |
+| HaluMem | `datasets/HaluMem/HaluMem-Medium.jsonl`（Long 版同目录） | JSON Lines，每行一个用户 | 问答任务，逐 session 交错提问，判分见 [HaluMem 接入说明](docs/halumem.md) |
 
 参考目录结构：
 
@@ -261,6 +262,7 @@ project-root/
 | LoCoMo | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat1_multi_hop.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat2_temporal.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat3_open_domain.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat4_single_hop.yaml` | 在长对话上进行对话式问答，提供完整版与按类别的子集 | JSON 文件，通常为 `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` |
 | LongBench | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | 在当前预设所使用的按比例采样子集上进行长上下文多选题推理 | HuggingFace `save_to_disk` 目录，通常为 `datasets/longBench_rep150_proportional/datasets` |
 | MemBench | `benchmark/membench/config/MemBench_simple.yaml`<br>`benchmark/membench/config/MemBench_noisy.yaml`<br>`benchmark/membench/config/MemBench_knowledge_update.yaml`<br>`benchmark/membench/config/MemBench_highlevel.yaml`<br>`benchmark/membench/config/MemBench_RecMultiSession.yaml` | 记忆压力测试，覆盖简单回忆、噪声、知识更新、高层次推理以及多会话推荐 | 位于 `datasets/MemBench/MemData/FirstAgent/` 下的各切片 JSON 文件 |
+| HaluMem | `benchmark/halumem/config/HaluMem_medium.yaml`<br>`benchmark/halumem/config/HaluMem_medium_user1.yaml`<br>`benchmark/halumem/config/HaluMem_long.yaml` | 记忆系统问答幻觉：每个 session 写入后立即回答该 session 的问题，官方判分给出正确/幻觉/遗漏率 | `datasets/HaluMem/HaluMem-Medium.jsonl`；Long 版需另行下载 |
 
 
 ## ⚙️ 配置约定

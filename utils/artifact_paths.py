@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 
@@ -94,8 +95,20 @@ def normalize_config_values(raw_value):
     return [str(value).strip() for value in values if str(value).strip()]
 
 
+def is_interleaved_dataset(dataset_config):
+    """Whether questions are asked between history chunks (HaluMem's session protocol)."""
+    return bool(dataset_config.get("interleave_queries"))
+
+
 def get_dataset_variant_components(dataset_config):
     """Return stable dataset-variant suffixes to prevent path collisions."""
+    if str(dataset_config.get("dataset", "")).lower() == "halumem":
+        components = ["interleaved" if is_interleaved_dataset(dataset_config) else "endofhistory"]
+        user_ids = normalize_config_values(dataset_config.get("halumem_user_ids"))
+        if user_ids:
+            digest = hashlib.sha256(",".join(sorted(user_ids)).encode("utf-8")).hexdigest()[:10]
+            components.append(f"users{len(user_ids)}-{digest}")
+        return components
     if str(dataset_config.get("dataset", "")).lower() != "locomo":
         return []
 

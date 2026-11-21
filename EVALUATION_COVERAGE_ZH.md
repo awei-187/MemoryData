@@ -64,7 +64,7 @@ MemoryData 通过 `main.py`、方法 YAML 和数据集 YAML，统一不同方法
 | `OPENAI_BASE_URL`、`OPENAI_API_KEY` | 模型服务地址和凭据；示例地址为 `https://api.openai.com/v1`，实际读取 `.env` 或进程环境，不在本文披露真实值 |
 | `OPENAI_API_TRUST_ENV` | 默认预设允许模型客户端使用已有代理环境；Hindsight 本地记忆服务 HTTP 连接单独处理 |
 | `tokenizer_encoding` | 预设统一为 `o200k_base` |
-| `output_dir`、`agent_variant_tag` | 默认回答输出为 `results/outputs/api/<preset>/`；变体标签为 `api-models-v1`，Hindsight 为 `api-models-v1-hindsight-retain-recall` |
+| `output_dir`、`agent_variant_tag` | 默认回答输出为 `results/outputs/api/<preset>/`；变体标签为 `api-models-v1`，Hindsight 为 `api-models-v1-hindsight-retain-recall-dated`（带时间写入与召回；此前结果用的是 `api-models-v1-hindsight-retain-recall`） |
 
 显式 YAML `base_url` 仍优先于其环境变量；模型变量的默认值也可被实际进程环境覆盖。23 是保留的预设数，**不等于 23 条方法都能在当前纯 API 模式下运行**：MemoRAG 的本地核心模型限制仍在。Long Context 和 BM25 不需要嵌入调用。
 
@@ -147,6 +147,12 @@ MemoryData 通过 `main.py`、方法 YAML 和数据集 YAML，统一不同方法
 
 依据：[MemBench 配置](benchmark/membench/config/)、[加载器](benchmark/membench/loader.py)。
 
+### 3.5 HaluMem（问答任务）
+
+`feature/halumem` 分支新增。每个用户是一个 context，按官方协议在每个 session 写入后立即回答该 session 的问题（`interleave_queries: true`）。主指标是官方 QA 提示词判分得到的正确／幻觉／遗漏率（默认判分模型 `gpt-4o`，由 `HALUMEM_JUDGE_MODEL` 配置），可按题型和难度汇总；EM/F1/ROUGE 只作辅助。记忆抽取与记忆更新评测尚未接入；MemoRAG 不支持交错提问。详见 [HaluMem 接入说明](docs/halumem.md)。
+
+依据：[HaluMem 配置](benchmark/halumem/config/)、[加载器](benchmark/halumem/loader.py)、[判分器](evaluation/halumem/halumem_judge.py)。
+
 ## 4. 具体评测哪些指标
 
 ### 4.1 公共回答质量指标
@@ -219,7 +225,7 @@ Judge 默认写 `*.longmemeval_judge.json`，不是覆盖原始回答文件。Lo
 
 ## 5. 当前覆盖边界与文档差异
 
-1. 当前源码没有可用的 `benchmark/omnimemeval/loader.py`、`benchmark/omnimemeval/runtime.py` 或 `evaluation/omnimemeval/evaluate.py`，公共加载器也没有 `dataset: OmniMemEval` 分派。此前旧对比文档中的五基准移植说明已失效，本次已将 [FRAMEWORK_COMPARISON_ZH.md](FRAMEWORK_COMPARISON_ZH.md) 更新为当前实现对照；BEAM、PersonaMem v2、HaluMem 不计入本项目当前接入列表。遗留 `__pycache__` 也不等于可用源码接入。
+1. 当前源码没有可用的 `benchmark/omnimemeval/loader.py`、`benchmark/omnimemeval/runtime.py` 或 `evaluation/omnimemeval/evaluate.py`，公共加载器也没有 `dataset: OmniMemEval` 分派。此前旧对比文档中的五基准移植说明已失效，本次已将 [FRAMEWORK_COMPARISON_ZH.md](FRAMEWORK_COMPARISON_ZH.md) 更新为当前实现对照；BEAM、PersonaMem v2 不计入本项目当前接入列表；HaluMem 已在 `feature/halumem` 分支按新的交错协议重新接入（见 3.5 节），与旧移植无关。遗留 `__pycache__` 也不等于可用源码接入。
 2. README 的论文结果图片提到了 DB-Bench，但当前加载入口和 YAML 中未发现对应基准接入，因此未计入四个基准族。
 3. `methods/*/source/` 内第三方源码可能自带其他数据集和评测工具；只有接入本项目主加载器／评分流程的部分才列入本文。比如 Cognee 内部的其他 QA adapter 不等于 MemoryData 主入口已接入这些基准。
 4. 本文列出的是支持范围和计算规则，没有把既有试跑或论文图表当作“23 种方法 × 全部数据集均已在本机完成评测”的证明。

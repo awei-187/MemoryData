@@ -678,6 +678,83 @@ class SettleTimeoutRecoveryTests(unittest.TestCase):
             self.assertTrue(agent.hindsight.state["ready"])
 
 
+class TimestampTests(unittest.TestCase):
+    def test_in_text_markers_and_mid_session_carry_over(self):
+        from methods.hindsight.hindsight_adapter import ChunkTimeTracker, find_time_markers
+        self.assertEqual(find_time_markers("Session 1 (12:30 am on 8 May, 2023)\nA: hi"), [(0, "2023-05-08T00:30:00")])
+        self.assertEqual(find_time_markers("Session 2 (12:05 pm on 1 June, 2023)")[0][1], "2023-06-01T12:05:00")
+        self.assertEqual(find_time_markers("Session 1 - Turn 2 [time: '2024-10-01 08:00' Tuesday; place: X]")[0][1],
+                         "2024-10-01T08:00:00")
+        self.assertEqual(find_time_markers("['Chat Time: 2022/11/17 (Thu) 12:04', [")[0][1], "2022-11-17T12:04:00")
+        self.assertEqual(find_time_markers("Session 1 (1:00 pm on 8 Smarch, 2023) no month; plain text"), [])
+        tracker = ChunkTimeTracker()
+        self.assertIsNone(tracker.timestamp_for("A chapter without any dates."))
+        self.assertEqual(tracker.timestamp_for("Session 1 (1:56 pm on 8 May, 2023)\nA: x"), "2023-05-08T13:56:00")
+        # Starts mid-session: earlier session's time, even though a later header appears in the chunk.
+        self.assertEqual(tracker.timestamp_for("B: still session 1\n\nSession 2 (9:00 am on 9 May, 2023)\nA: y"),
+                         "2023-05-08T13:56:00")
+        self.assertEqual(tracker.timestamp_for("A: continues session 2"), "2023-05-09T09:00:00")
+        self.assertEqual(tracker.timestamp_for("[\"Chat Time: 2023/01/05 (Thu) 12:34\""), "2023-01-05T12:34:00")
+
+    def test_membench_question_time_and_recall_date_rendering(self):
+        from methods.hindsight.hindsight_adapter import normalize_query_timestamp, render_recall_entry
+        self.assertEqual(normalize_query_timestamp("'2024-10-04 08:49' Friday"), "2024-10-04T08:49:00")
+        self.assertEqual(render_recall_entry({"text": "Fact"}), "Fact")
+        self.assertEqual(render_recall_entry({"text": "Fact", "occurred_start": "2023-05-08T00:00:00",
+                                              "occurred_end": "2023-05-08T00:00:00", "mentioned_at": "2023-05-09T13:00:00"}),
+                         "[occurred: 2023-05-08T00:00:00; mentioned: 2023-05-09T13:00:00] Fact")
+        self.assertEqual(render_recall_entry({"text": "Trip", "occurred_start": "2023-05-01", "occurred_end": "2023-05-07"}),
+                         "[occurred: 2023-05-01 to 2023-05-07] Trip")
+
+    def test_infer_timestamps_is_part_of_the_bank_identity(self):
+        backend = Backend()
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"HINDSIGHT_API_URL": "", "HINDSIGHT_API_KEY": ""}):
+            def adapter(**changes):
+                return HindsightAdapter({"hindsight_base_url": "http://offline.invalid", **changes},
+                                        {"dataset": "LoCoMo", "sub_dataset": "locomo_qa"}, Path(directory) / "s",
+                                        transport=httpx.MockTransport(backend.transport))
+            plain = adapter()
+            plain.add_chunk("Session 1 (1:56 pm on 8 May, 2023)\nA: x")
+            plain.save()
+            with self.assertRaisesRegex(ValueError, "differs"):
+                adapter(hindsight_infer_timestamps=True)  # bank was retained without timestamps
+            adapter().load()  # unchanged configs keep working
+            backend.recall_results = {"results": [{"id": "1", "text": "Fact", "mentioned_at": "2023-05-08T13:56:00"}]}
+            self.assertEqual(adapter(hindsight_recall_include_dates=True).retrieve("q")[0]["display_text"],
+                             "[mentioned: 2023-05-08T13:56:00] Fact")
+            self.assertEqual(adapter().retrieve("q")[0]["display_text"], "Fact")
+
+    def test_handler_sends_inferred_retain_times_query_time_and_dated_memories(self):
+        from utils.agent import AgentWrapper
+        from utils.locomo_utils import build_locomo_storage_text
+        backend = Backend()
+        endpoint = serve_over_loopback(self, backend)
+        config = yaml.safe_load((ROOT / "config/hybrid_hindsight.yaml").read_text())
+        self.assertTrue(config["hindsight_infer_timestamps"] and config["hindsight_recall_include_dates"])
+        config.update(base_url=endpoint + "/v1", hindsight_base_url=endpoint, model="offline-model", model_api_trust_env=False)
+        dataset = yaml.safe_load((ROOT / "benchmark/membench/config/MemBench_simple.yaml").read_text())
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "offline", "HINDSIGHT_API_URL": ""}), \
+             patch.object(AgentWrapper, "_initialize_tokenizer", return_value=CharacterTokenizer()):
+            agent = AgentWrapper(dict(config, output_dir=directory), dataset, str(Path(directory) / "state"))
+            text = "Session 1 - Turn 1 [time: '2024-10-01 08:00' Tuesday; place: Boston]\nUser: my uncle is 27."
+            agent.send_message({"text": text, "storage_text": build_locomo_storage_text(text, "c0", ["1"])},
+                               memorizing=True, context_id=0)
+            agent.send_message({"text": "No marker here", "timestamp": "2024-10-02T09:00:00"}, memorizing=True, context_id=0)
+            agent.send_message("User: a reply without its own header", memorizing=True, context_id=0)
+            agent.save_agent()
+            backend.recall_results = {"results": [{"id": "1", "text": "Uncle is 27", "occurred_start": "2024-10-01T08:00:00"}]}
+            agent.send_message("How old is my uncle?", query_id=0, context_id=0,
+                               eval_metadata={"dataset": "membench_qa", "question_time": "'2024-10-04 08:49' Friday"})
+        retains = [body["items"][0]["timestamp"] for _, path, body in backend.calls if path.endswith("/memories")]
+        self.assertEqual(retains, ["2024-10-01T08:00:00", "2024-10-02T09:00:00", "2024-10-01T08:00:00"])
+        recall = next(body for _, path, body in backend.calls if path.endswith("/recall"))
+        self.assertEqual(recall["query_timestamp"], "2024-10-04T08:49:00")
+        answer_prompt = next(body for _, path, body in backend.calls if path.endswith("/chat/completions"))
+        self.assertIn("[occurred: 2024-10-01T08:00:00] Uncle is 27", json.dumps(answer_prompt))
+
+
 class APIConfigurationTests(unittest.TestCase):
     def test_copied_openai_settings_feed_native_hindsight_without_local_models(self):
         from methods.hindsight.api_config import server_environment

@@ -152,6 +152,7 @@ Datasets are **not** bundled with this repository. Place them under `datasets/` 
 | LoCoMo | `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` | JSON file | Used by the full and category-specific LoCoMo presets |
 | LongBench | `datasets/longBench_rep150_proportional/datasets` | HuggingFace `save_to_disk` directory | Targets the proportional subset |
 | MemBench | `datasets/MemBench/MemData/FirstAgent/*.json` | JSON files | `simple`, `noisy`, `knowledge_update`, `highlevel`, `RecMultiSession` |
+| HaluMem | `datasets/HaluMem/HaluMem-Medium.jsonl` (Long in the same folder) | JSON Lines, one user per line | QA task with session-interleaved questions; see [docs/halumem.md](docs/halumem.md) |
 
 Reference layout:
 
@@ -261,6 +262,7 @@ The taxonomy below follows the grouping used in the main RQ1 effectiveness table
 | LoCoMo | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat1_multi_hop.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat2_temporal.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat3_open_domain.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat4_single_hop.yaml` | Conversational QA over long dialogues, with full and category-specific subsets | JSON file, typically `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` |
 | LongBench | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | Long-context multiple-choice reasoning on the proportional subset used by the current preset | HuggingFace `save_to_disk` directory, typically `datasets/longBench_rep150_proportional/datasets` |
 | MemBench | `benchmark/membench/config/MemBench_simple.yaml`<br>`benchmark/membench/config/MemBench_noisy.yaml`<br>`benchmark/membench/config/MemBench_knowledge_update.yaml`<br>`benchmark/membench/config/MemBench_highlevel.yaml`<br>`benchmark/membench/config/MemBench_RecMultiSession.yaml` | Memory stress tests covering simple recall, noise, knowledge updates, high-level reasoning, and multi-session recommendation | Slice-specific JSON files under `datasets/MemBench/MemData/FirstAgent/` |
+| HaluMem | `benchmark/halumem/config/HaluMem_medium.yaml`<br>`benchmark/halumem/config/HaluMem_medium_user1.yaml`<br>`benchmark/halumem/config/HaluMem_long.yaml` | Memory-system QA hallucination: each session's questions are answered right after that session is memorized; the official judge reports correct / hallucination / omission rates | `datasets/HaluMem/HaluMem-Medium.jsonl`; download the Long file separately |
 
 
 ## ⚙️ Configuration Conventions

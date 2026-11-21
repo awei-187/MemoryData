@@ -4,6 +4,7 @@ from benchmark.memoryagentbench.hf_datasets import load_from_disk
 from benchmark.locomo.loader import load_locomo_eval_data
 from benchmark.longbench.loader import load_longbench_eval_data
 from benchmark.membench.loader import load_membench_eval_data
+from benchmark.halumem.loader import load_halumem_eval_data
 from pathlib import Path
 
 import logging
@@ -265,6 +266,8 @@ def load_eval_data(dataset_config):
         return load_longbench_eval_data(dataset_config)
     if str(main_dataset_name).lower() == "membench":
         return load_membench_eval_data(dataset_config)
+    if str(main_dataset_name).lower() == "halumem":
+        return load_halumem_eval_data(dataset_config)
 
     # Check if it's a HuggingFace dataset
     if main_dataset_name in supported_hf_datasets:

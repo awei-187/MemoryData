@@ -45,13 +45,91 @@ def normalize_query_timestamp(value):
         return value
     except ValueError:
         pass
+    # MemBench question times look like "'2024-10-04 08:49' Friday".
+    membench = re.fullmatch(r"'(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})'(?:\s+[A-Za-z]+)?", value)
+    if membench:
+        return datetime.strptime(" ".join(membench.groups()), '%Y-%m-%d %H:%M').isoformat()
     # MemoryAgentBench LongMemEval dates include an English weekday. Strip it
     # explicitly rather than depending on the Windows process locale (%a).
     compact = re.sub(r'(?<=\d)\s+\([A-Za-z]{3}\)(?=\s+\d{2}:\d{2}$)', '', value)
     try:
         return datetime.strptime(compact, '%Y/%m/%d %H:%M').isoformat()
     except ValueError as exc:
-        raise ValueError('Unsupported Hindsight query_timestamp; expected ISO or YYYY/MM/DD (Day) HH:MM') from exc
+        raise ValueError('Unsupported Hindsight query_timestamp; expected ISO, YYYY/MM/DD (Day) HH:MM '
+                         "or 'YYYY-MM-DD HH:MM' Day") from exc
+
+
+_MONTHS = {name: index for index, name in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"], start=1)}
+# Time markers that benchmark loaders write into chunk text. Each match starts
+# at its header, so text before it means the chunk began mid-session.
+_TIME_MARKERS = (
+    # LoCoMo session header: "Session 3 (1:56 pm on 8 May, 2023)"
+    (re.compile(r"Session \d+ \((\d{1,2}):(\d{2})\s*([ap]m) on (\d{1,2}) ([A-Za-z]+),? (\d{4})\)", re.I), "locomo"),
+    # MemBench turn header: "Session 1 - Turn 1 [time: '2024-10-01 08:00' Tuesday; ..."
+    (re.compile(r"(?:Session \d+ - Turn \d+ )?\[time: '(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})'"), "membench"),
+    # MemoryAgentBench LongMemEval: "Chat Time: 2022/11/17 (Thu) 12:04"
+    (re.compile(r"Chat Time: (\d{4})/(\d{2})/(\d{2}) \([A-Za-z]{3}\) (\d{2}):(\d{2})"), "longmemeval"),
+)
+
+
+def _marker_time(kind, groups):
+    if kind == "locomo":
+        hour, minute, meridiem, day, month, year = groups
+        month_number = _MONTHS.get(month.lower())
+        if month_number is None:
+            return None
+        hour = int(hour) % 12 + (12 if meridiem.lower() == "pm" else 0)
+        return datetime(int(year), month_number, int(day), hour, int(minute))
+    return datetime(*(int(value) for value in groups))
+
+
+def find_time_markers(text):
+    """[(start, iso_time)] for every recognized benchmark time marker in text, in order."""
+    markers = []
+    for pattern, kind in _TIME_MARKERS:
+        for match in pattern.finditer(text or ""):
+            try:
+                moment = _marker_time(kind, match.groups())
+            except ValueError:
+                moment = None
+            if moment is not None:
+                markers.append((match.start(), moment.isoformat()))
+    return sorted(markers)
+
+
+class ChunkTimeTracker:
+    """Timestamps for history chunks from in-text session/turn time markers.
+
+    A chunk takes the time of its first marker, or the time carried over from
+    earlier chunks when it starts mid-session (content before its first
+    marker) or has no marker. Chunks must be fed in history order.
+    """
+
+    def __init__(self):
+        self.last = None
+
+    def timestamp_for(self, text):
+        markers = find_time_markers(text)
+        if not markers:
+            return self.last
+        start, first = markers[0]
+        starts_mid_session = bool(re.sub(r"[\s\[\]'\",]", "", text[:start]))
+        timestamp = self.last if (starts_mid_session and self.last) else first
+        self.last = markers[-1][1]
+        return timestamp
+
+
+def render_recall_entry(entry):
+    """Memory text with the native dates Hindsight returned, for the answer prompt."""
+    dates = []
+    start, end = entry.get("occurred_start"), entry.get("occurred_end")
+    if start:
+        dates.append(f"occurred: {start}" + (f" to {end}" if end and end != start else ""))
+    if entry.get("mentioned_at"):
+        dates.append(f"mentioned: {entry['mentioned_at']}")
+    return f"[{'; '.join(dates)}] {entry['text']}" if dates else entry["text"]
 
 
 _WARNED_TIMESTAMPS = set()
@@ -102,6 +180,9 @@ class HindsightAdapter:
         self.bank_config = dict(agent_config.get("hindsight_bank_config") or {})
         self.wait_for_consolidation = bool(agent_config.get("hindsight_wait_for_consolidation", True))
         self.settle_timeout = float(agent_config.get("hindsight_settle_timeout_seconds", 300))
+        # Off by default so earlier configs and saved banks keep their meaning.
+        self.infer_timestamps = bool(agent_config.get("hindsight_infer_timestamps", False))
+        self.recall_include_dates = bool(agent_config.get("hindsight_recall_include_dates", False))
         self.transport = transport
         if self.budget not in {"low", "mid", "high"} or min(self.top_k, self.max_tokens, self.timeout, self.settle_timeout) <= 0:
             raise ValueError("Hindsight needs positive retrieve_num/token budget/timeout and a low/mid/high recall budget")
@@ -127,9 +208,14 @@ class HindsightAdapter:
         # consolidation. Recall parameters act at query time and the settle
         # timeout is only a wait budget, so changing them reuses the bank.
         def identity(dataset_value, state_dir_value):
-            return fingerprint({**base, "identity_version": 2, "dataset": dataset_value,
-                                "state_dir": state_dir_value, "location": "repo-relative",
-                                "wait_for_consolidation": self.wait_for_consolidation})
+            value = {**base, "identity_version": 2, "dataset": dataset_value,
+                     "state_dir": state_dir_value, "location": "repo-relative",
+                     "wait_for_consolidation": self.wait_for_consolidation}
+            if self.infer_timestamps:
+                # Retain timestamps then come from in-text markers, so banks
+                # built without them must not be reused.
+                value["retain_timestamps"] = "text-markers-v1"
+            return fingerprint(value)
 
         # Paths inside the repository are fingerprinted relative to it, so
         # moving the whole checkout keeps saved states valid. Paths outside it
@@ -142,8 +228,9 @@ class HindsightAdapter:
             stored = self.state.get("identity")
             # Older identities also hashed recall/settle values and are reused
             # as is, never rewritten, so snapshot origins keep their SHA-256.
-            if stored != self.identity and stored not in self._legacy_identities(
-                    agent_config, base, dataset, identity_state_dir):
+            legacy = set() if self.infer_timestamps else self._legacy_identities(
+                agent_config, base, dataset, identity_state_dir)
+            if stored != self.identity and stored not in legacy:
                 raise ValueError("Hindsight saved configuration/history differs; use --force or a new --artifact_root")
         else:
             # UUID ownership avoids adopting/deleting an unrelated pre-existing bank.
@@ -265,37 +352,59 @@ class HindsightAdapter:
         self.state["documents"][document_id] = source_ids
         _save(self.path, self.state)
 
+    def settle(self):
+        """Make the history retained so far answerable without completing the bank.
+
+        Used at interleaved question points (HaluMem): waits for consolidation
+        like save(), but retain may continue afterwards. retrieve() accepts the
+        bank until the next retain, then requires another settle().
+        """
+        if self.state.get("ready"):
+            return
+        self.prepare()
+        if self.wait_for_consolidation:
+            self.state["last_settled_stats"] = self._wait_for_consolidation()
+        self.state["settled_documents"] = len(self.state["documents"])
+        _save(self.path, self.state)
+
+    def _answerable(self):
+        settled = self.state.get("settled_documents")
+        return bool(self.state.get("ready")) or (settled is not None and settled == len(self.state["documents"]))
+
     def save(self):
         self.prepare()
         if self.wait_for_consolidation and not self.state.get("ready"):
-            deadline = time.monotonic() + self.settle_timeout
-            while True:
-                stats = self._request("GET", "/stats?refresh=true")
-                self.state['last_consolidation_stats'] = stats
-                if not {"pending_operations", "failed_operations", "pending_consolidation", "operations_by_status"} <= stats.keys():
-                    raise ValueError("Hindsight stats lack consolidation readiness fields required by this adapter")
-                if stats["failed_operations"]:
-                    _save(self.path, self.state)
-                    raise RuntimeError("Hindsight reports failed background operations; ingestion is not complete")
-                busy = (stats["pending_operations"] or stats["pending_consolidation"]
-                        or stats["operations_by_status"].get("pending", 0)
-                        or stats["operations_by_status"].get("processing", 0))
-                if not busy:
-                    break
-                if time.monotonic() >= deadline:
-                    _save(self.path, self.state)
-                    raise TimeoutError(
-                        f"Hindsight consolidation did not settle within {self.settle_timeout:g}s; "
-                        f"pending_operations={stats['pending_operations']}, "
-                        f"pending_consolidation={stats['pending_consolidation']}. "
-                        "All acknowledged chunks are kept; rerun the same command (a larger "
-                        "hindsight_settle_timeout_seconds is allowed) to keep waiting without retaining again."
-                    )
-                print("Waiting for Hindsight background memory consolidation...", flush=True)
-                time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
-            self.state["settled_stats"] = stats
+            self.state["settled_stats"] = self._wait_for_consolidation()
         self.state["ready"] = True
         _save(self.path, self.state)
+
+    def _wait_for_consolidation(self):
+        """Poll native stats until no background work is pending; return the final stats."""
+        deadline = time.monotonic() + self.settle_timeout
+        while True:
+            stats = self._request("GET", "/stats?refresh=true")
+            self.state['last_consolidation_stats'] = stats
+            if not {"pending_operations", "failed_operations", "pending_consolidation", "operations_by_status"} <= stats.keys():
+                raise ValueError("Hindsight stats lack consolidation readiness fields required by this adapter")
+            if stats["failed_operations"]:
+                _save(self.path, self.state)
+                raise RuntimeError("Hindsight reports failed background operations; ingestion is not complete")
+            busy = (stats["pending_operations"] or stats["pending_consolidation"]
+                    or stats["operations_by_status"].get("pending", 0)
+                    or stats["operations_by_status"].get("processing", 0))
+            if not busy:
+                return stats
+            if time.monotonic() >= deadline:
+                _save(self.path, self.state)
+                raise TimeoutError(
+                    f"Hindsight consolidation did not settle within {self.settle_timeout:g}s; "
+                    f"pending_operations={stats['pending_operations']}, "
+                    f"pending_consolidation={stats['pending_consolidation']}. "
+                    "All acknowledged chunks are kept; rerun the same command (a larger "
+                    "hindsight_settle_timeout_seconds is allowed) to keep waiting without retaining again."
+                )
+            print("Waiting for Hindsight background memory consolidation...", flush=True)
+            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
     def resume_completed_ingestion(self, expected_documents):
         """Resume only acknowledged full ingestion; never resend retain or mark ready directly."""
@@ -306,6 +415,22 @@ class HindsightAdapter:
             raise ValueError('Cannot resume: native document count differs or background operations failed')
         self.prepared = True
         self.save()  # The ordinary native readiness checks still decide completion.
+        return stats
+
+    def resume_interleaved_prefix(self, expected_documents):
+        """Reopen a bank whose acknowledged documents are exactly a history prefix (interleaved runs).
+
+        Used after a settle() timeout or a failed question at an interleaved
+        question point: retain continues after the prefix instead of deleting
+        the bank. The caller settles again before answering; nothing is resent.
+        """
+        if self.state.get("ready") or not expected_documents or self.state.get("documents") != expected_documents:
+            raise ValueError("Cannot resume: acknowledged document IDs/source mappings do not match this history prefix")
+        stats = self._request("GET", "/stats?refresh=true")
+        if stats.get("total_documents") != len(expected_documents) or stats.get("failed_operations") != 0:
+            raise ValueError("Cannot resume: native document count differs or background operations failed")
+        self.prepared = True
+        self.chunk_index = len(expected_documents)
         return stats
 
     def load(self):
@@ -324,8 +449,9 @@ class HindsightAdapter:
         self.prepared = True
 
     def retrieve(self, query, *, query_timestamp=None):
-        if not self.state.get("ready"):
-            raise RuntimeError("Save the complete Hindsight history before querying")
+        if not self._answerable():
+            raise RuntimeError("Save the complete Hindsight history (or settle() at an interleaved "
+                               "question point, with no retain since) before querying")
         query_timestamp = query_timestamp_or_none(query_timestamp)
         self.prepare()
         payload = {"query": query, "budget": self.budget, "max_tokens": self.max_tokens,
@@ -347,8 +473,13 @@ class HindsightAdapter:
 
         # The API budgets by tokens, not by top_k. Apply MemoryData's k cap
         # after native ranking without sending an unsupported top_k parameter.
-        return [{"text": r["text"], "source_ids": sources(r, set()), "id": r.get("id"),
-                 "document_id": r.get("document_id")} for r in results if r["text"].strip()][:self.top_k]
+        entries = [{"text": r["text"], "source_ids": sources(r, set()), "id": r.get("id"),
+                    "document_id": r.get("document_id"), "occurred_start": r.get("occurred_start"),
+                    "occurred_end": r.get("occurred_end"), "mentioned_at": r.get("mentioned_at")}
+                   for r in results if r["text"].strip()][:self.top_k]
+        for entry in entries:
+            entry["display_text"] = render_recall_entry(entry) if self.recall_include_dates else entry["text"]
+        return entries
 
     @classmethod
     def reset_saved(cls, agent_config, state_dir):
