@@ -69,7 +69,7 @@ RememAdapter ──JSON lines（stdin/stdout）──> methods/remem/remem_worke
 REMem 环境已于 2026-11-20 创建（Python 3.11，torch 2.6.0、numpy 1.26.4、openai 1.109.1、python-igraph 0.11.8、bm25s 0.3.16，`pip check` 无冲突）。在其他机器上重建：
 
 ```powershell
-C:\Users\wjp\anaconda3\Scripts\conda.exe create -y -p D:\conda\envs\remem python=3.11
+conda create -y -p D:\conda\envs\remem python=3.11
 ```
 
 ```powershell
