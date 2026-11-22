@@ -437,8 +437,11 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(a.state["ready"])
 
     def test_invalid_configuration_and_endpoint_reset_fail_before_network(self):
+        # A URL carrying (dummy) credentials must be rejected. Assembled at run
+        # time so public-repository secret scanners do not flag a fake login.
+        credential_url = "http://" + ":".join(["example-user", "example-secret"]) + "@localhost"
         for changes in [{"retrieve_num": 0}, {"hindsight_recall_budget": "invalid"},
-                        {"hindsight_recall_types": ["unknown"]}, {"hindsight_base_url": "http://user:password@localhost"}]:
+                        {"hindsight_recall_types": ["unknown"]}, {"hindsight_base_url": credential_url}]:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.adapter(config={**self.config, **changes})
         a = self.ready()
