@@ -13,6 +13,9 @@ logger.setLevel(logging.INFO)
 
 
 MEMORY_AGENT_NAME_HINTS = (
+    "hindsight",
+    "remem",
+    "tsm",
     "mem0",
     "letta",
     "cognee",
@@ -53,6 +56,10 @@ class ConversationCreator:
         self.context_max_length = dataset_config['context_max_length']
         self.agent_name = agent_config['agent_name']
         self.sub_dataset = dataset_config['sub_dataset']
+        self.smoke_max_history_chunks = dataset_config.get('smoke_max_history_chunks')
+        if self.smoke_max_history_chunks is not None:
+            if type(self.smoke_max_history_chunks) is not int or self.smoke_max_history_chunks <= 0:
+                raise ValueError('smoke_max_history_chunks must be a positive integer')
         
         # Determine chunk size based on agent type
         self.chunk_size = self._determine_chunk_size(agent_config, dataset_config)
@@ -306,6 +313,12 @@ class ConversationCreator:
 
         # Validate the output structure
         self._validate_chunks_structure(all_context_chunks)
+        if self.smoke_max_history_chunks is not None:
+            original_counts = [len(chunks) for chunks in all_context_chunks]
+            all_context_chunks = [chunks[:self.smoke_max_history_chunks] for chunks in all_context_chunks]
+            logger.warning('SMOKE TEST: history limited to first %s chunks; original counts=%s. '
+                           'Scores are not comparable to complete-history evaluations.',
+                           self.smoke_max_history_chunks, original_counts)
         return all_context_chunks
 
     def _validate_chunks_structure(self, chunks):

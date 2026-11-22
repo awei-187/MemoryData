@@ -8,10 +8,11 @@ import yaml
 import shutil
 from collections import defaultdict
 from utils.conversation_creator import ConversationCreator
-from utils.agent import AgentWrapper, _build_zep_local_namespace
+from utils.agent import AgentWrapper, _build_zep_local_namespace, interleaved_query_unsupported_reason
 from tqdm import tqdm
 from utils.eval_other_utils import metrics_summarization
 from utils.provider_utils import (
+    resolve_model_config,
     resolve_base_url as _resolve_base_url,
     resolve_env_value as _resolve_env_value,
 )
@@ -22,8 +23,11 @@ from utils.artifact_paths import (
     generate_memory_agent_base_path as _generate_memory_agent_base_path_with_root,
     generate_rag_agent_path as _generate_rag_agent_path_with_root,
     generate_agent_save_folder_path,
+    get_dataset_variant_components,
+    is_interleaved_dataset,
     rebase_legacy_artifact_path,
     resolve_artifact_root,
+    sanitize_artifact_component,
 )
 
 
@@ -35,6 +39,10 @@ A_MEM_CHECKPOINT_INTERVAL = 5
 # ============================================================================
 # MAIN WORKFLOW FUNCTIONS (in typical execution order)
 # ============================================================================
+
+# Memory methods that run behind a worker in their own environment (methods/worker_bridge.py).
+WORKER_MEMORY_METHODS = ("remem", "tsm")
+
 
 def setup_configs_and_directories(command_line_args):
     """
@@ -49,6 +57,7 @@ def setup_configs_and_directories(command_line_args):
     # Load configuration files
     agent_config = _load_yaml_config(command_line_args.agent_config)
     dataset_config = _load_yaml_config(command_line_args.dataset_config)
+    agent_config = resolve_model_config(agent_config)
 
     artifact_root = resolve_artifact_root(command_line_args, agent_config)
     if artifact_root:
@@ -126,10 +135,9 @@ def load_existing_results(output_file_path, dataset_config, all_query_answer_pai
 
         query = saved_data_entry['query']
         
-        # Handle both list and string answer formats
-        answer = (saved_data_entry['answer'][0] 
-                 if isinstance(saved_data_entry['answer'], list) 
-                 else saved_data_entry['answer'])
+        # Preserve all accepted answers when recomputing resumed results.
+        # Taking [0] changes scores for multi-answer gold after a network retry.
+        answer = saved_data_entry['answer']
         
         # Reconstruct output format expected by metrics_summarization
         reconstructed_output = {
@@ -285,14 +293,45 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
 
     # Initialize the agent wrapper
     effective_agent_config = dict(agent_config)
+    if "hindsight" in str(agent_config.get("agent_name", "")).lower():
+        from methods.hindsight.hindsight_adapter import fingerprint
+        effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    if any(method in str(agent_config.get("agent_name", "")) for method in WORKER_MEMORY_METHODS):
+        from methods.worker_bridge import fingerprint as worker_fingerprint
+        effective_agent_config["_memory_history_fingerprint"] = worker_fingerprint(context_chunks)
     if backfill_longmemeval_recall_debug:
         effective_agent_config["_backfill_longmemeval_recall_debug"] = True
+    mem0_checkpoint = None
+    mem0_checkpoint_enabled = agent_config.get("mem0_checkpoint_enabled") or os.environ.get('MEMORYDATA_MEM0_CHECKPOINT_ENABLED') == '1'
+    if "mem0" in str(agent_config.get("agent_name", "")).lower() and mem0_checkpoint_enabled:
+        from utils.mem0_checkpoint import Mem0Checkpoint
+        mem0_checkpoint = Mem0Checkpoint(agent_save_folder, context_chunks, effective_agent_config,
+                                         dataset_config, current_context_index)
+        mem0_checkpoint.restore_before_open()
+    elif "mem0" in str(agent_config.get("agent_name", "")).lower() and os.path.exists(os.path.join(agent_save_folder, 'mem0_ingestion_checkpoint.json')):
+        raise ValueError('This Mem0 state has chunk checkpoints; explicitly enable checkpoint recovery before opening it')
     agent = AgentWrapper(effective_agent_config, dataset_config, load_agent_from=agent_save_folder)
+    if mem0_checkpoint:
+        mem0_checkpoint.attach_provenance(agent)
     native_timing_sidecar = None
     
     # Handle memorization or loading based on whether saved state exists
     should_load_existing_agent = (not force_rebuild) and os.path.exists(agent_save_folder)
     agent_name = agent_config.get("agent_name", "")
+    if "hindsight" in agent_name:
+        should_load_existing_agent = bool(agent.hindsight.state.get("ready")) and not force_rebuild
+        if not should_load_existing_agent and not force_rebuild:
+            expected_documents = agent.hindsight_expected_documents(context_chunks)
+            if agent.hindsight.awaits_consolidation_only(expected_documents):
+                # Every chunk was acknowledged earlier, only readiness timed out:
+                # keep waiting on the same bank instead of deleting and retaining again.
+                logger.info("Hindsight history for context %s is fully retained; waiting for consolidation only",
+                            current_context_index)
+                agent.hindsight.resume_completed_ingestion(expected_documents)
+                should_load_existing_agent = True
+    if any(method in agent_name for method in WORKER_MEMORY_METHODS):
+        # REMem/TSM: reuse only a state whose manifest says the full history was indexed.
+        should_load_existing_agent = bool(agent.worker_memory.state.get("ready")) and not force_rebuild
     if "letta" in agent_name:
         letta_agent_id_path = os.path.join(agent_save_folder, "agent_id.txt")
         if "api" in agent_name:
@@ -362,6 +401,12 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
     else:
         start_chunk_index = 0
         checkpoint_callback = None
+        if mem0_checkpoint:
+            start_chunk_index = mem0_checkpoint.next_chunk_index
+            if not mem0_checkpoint.manifest:
+                mem0_checkpoint.capture(agent, 0, [])
+            logger.info("Mem0 committed history: %s/%s chunks; continuing from verified checkpoint",
+                        start_chunk_index, len(context_chunks))
 
         if "a_mem" in agent_name:
             a_mem_state_path = getattr(agent, "a_mem_state_path", None)
@@ -400,10 +445,8 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
             start_chunk_index=start_chunk_index,
             checkpoint_interval=A_MEM_CHECKPOINT_INTERVAL if "a_mem" in agent_name else None,
             checkpoint_callback=checkpoint_callback,
+            mem0_checkpoint=mem0_checkpoint,
         )
-        agent.save_agent()
-        if "a_mem" in agent_name:
-            _clear_a_mem_checkpoint(agent_save_folder)
         native_timing_sidecar = _build_membench_native_timing_sidecar(
             dataset_config=dataset_config,
             agent_save_folder=agent_save_folder,
@@ -411,7 +454,19 @@ def initialize_and_memorize_agent(agent_config, dataset_config, agent_save_folde
             context_chunks=context_chunks,
             write_times=write_times,
         )
-        _save_membench_native_timing_sidecar(agent_save_folder, native_timing_sidecar)
+        # A Hindsight settle timeout raises inside save_agent; persist the write
+        # timings first so the resumed wait still reports them. Other agents keep
+        # the original order, since some treat an existing folder as a saved agent.
+        save_timing_first = "hindsight" in agent_name
+        if save_timing_first:
+            _save_membench_native_timing_sidecar(agent_save_folder, native_timing_sidecar)
+        agent.save_agent()
+        if not save_timing_first:
+            _save_membench_native_timing_sidecar(agent_save_folder, native_timing_sidecar)
+        if "a_mem" in agent_name:
+            _clear_a_mem_checkpoint(agent_save_folder)
+        if mem0_checkpoint:
+            mem0_checkpoint.finish()
         
     return agent, native_timing_sidecar
 
@@ -438,6 +493,20 @@ def _is_missing_resource_error(exc):
 def _reset_external_persistent_state(agent_config, dataset_config, agent_save_folder, current_context_index):
     """Best-effort reset for state that lives outside the local agent folder."""
     agent_name = agent_config.get("agent_name", "")
+
+    if "hindsight" in agent_name:
+        from methods.hindsight import HindsightAdapter
+        HindsightAdapter.reset_saved(agent_config, agent_save_folder)
+
+    if any(method in agent_name for method in WORKER_MEMORY_METHODS):
+        # A live worker keeps its context folder open (locked on Windows).
+        from methods.worker_bridge import close_all_workers
+        close_all_workers()
+
+    if "tsm" in agent_name:
+        # REMem keeps everything in the local folder; TSM also owns a Neo4j group.
+        from methods.tsm import TsmAdapter
+        TsmAdapter.reset_saved(agent_config, dataset_config, agent_save_folder)
 
     if "letta" in agent_name and "api" in agent_name:
         _reset_letta_api_agent(agent_config, agent_save_folder)
@@ -555,7 +624,7 @@ def _reset_memorag_cache(agent_config, dataset_config, current_context_index):
 
 def _load_yaml_config(config_file_path):
     """Load and return YAML configuration from file."""
-    with open(config_file_path, 'r') as file:
+    with open(config_file_path, 'r', encoding='utf-8') as file:
         return yaml.safe_load(file)
 
 
@@ -576,7 +645,7 @@ def _apply_chunk_size_ablation(command_line_args, agent_config, dataset_config):
     new_chunk_size = command_line_args.chunk_size_ablation
     
     # Check if this is a memory agent that uses agent_chunk_size
-    if any(agent_name in agent_config['agent_name'] for agent_name in ['mem0', 'letta', 'cognee', 'memtree', 'memochat', 'memoryos', 'zep', 'simplemem', 'lightmem', 'a_mem', 'everos', 'MemOS']):
+    if any(agent_name in agent_config['agent_name'] for agent_name in ['mem0', 'hindsight', 'remem', 'tsm', 'letta', 'cognee', 'memtree', 'memochat', 'memoryos', 'zep', 'simplemem', 'lightmem', 'a_mem', 'everos', 'MemOS']):
         agent_config['agent_chunk_size'] = new_chunk_size
         dataset_config['chunk_size'] = new_chunk_size
         print(f"\n\nUsing agent chunk_size: {agent_config['agent_chunk_size']}\n\n")
@@ -616,7 +685,7 @@ def _create_output_path(agent_config, dataset_config):
     name_tag = _generate_output_name_tag(agent_config, dataset_config)
     
     # Create output directory for this dataset
-    output_directory = os.path.join(agent_config['output_dir'], dataset_config['dataset'])
+    output_directory = os.path.join(agent_config['output_dir'], sanitize_artifact_component(dataset_config['dataset']))
     os.makedirs(output_directory, exist_ok=True)
     
     # Create complete output file path
@@ -636,6 +705,8 @@ def _normalize_config_values(raw_value):
 
 def _get_dataset_variant_components(dataset_config):
     """Return stable dataset-variant suffixes to prevent path collisions."""
+    if str(dataset_config.get("dataset", "")).lower() == "halumem":
+        return get_dataset_variant_components(dataset_config)
     if str(dataset_config.get("dataset", "")).lower() != "locomo":
         return []
 
@@ -718,7 +789,7 @@ def _generate_output_name_tag(agent_config, dataset_config):
             f"chunk{safe_get(agent_config, 'agent_chunk_size')}",
             f"mode{safe_get(agent_config, 'letta_mode')}"
         ]
-    elif any(agent_type in agent_name for agent_type in ["mem0", "cognee", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "MemOS"]):
+    elif any(agent_type in agent_name for agent_type in ["mem0", "hindsight", "remem", "tsm", "cognee", "memtree", "memochat", "memoryos", "zep", "simplemem", "lightmem", "a_mem", "everos", "MemOS"]):
         agent_components = [
             f"k{_resolve_retrieve_component(agent_config, agent_name)}",
             f"chunk{_resolve_agent_chunk_component(agent_config, dataset_config)}"
@@ -733,7 +804,7 @@ def _generate_output_name_tag(agent_config, dataset_config):
     if variant_tag:
         agent_components.append(f"variant{variant_tag}")
     
-    return "_".join(base_components + agent_components)
+    return sanitize_artifact_component("_".join(base_components + agent_components))
 
 
 # ============================================================================
@@ -799,6 +870,78 @@ def _generate_default_agent_path(agent_config, dataset_config, current_context_i
 # AGENT INITIALIZATION HELPERS
 # ============================================================================
 
+def create_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, current_context_index):
+    """Fresh agent for a session-interleaved context (HaluMem).
+
+    Questions are asked between history chunks, so a partially processed
+    context cannot be resumed from saved memory: its local and external state
+    is always reset and the whole history is rebuilt in order.
+    """
+    agent_name = str(agent_config.get("agent_name", ""))
+    unsupported = interleaved_query_unsupported_reason(agent_name)
+    if unsupported:
+        raise ValueError(f"{agent_name} cannot run interleaved (session-scheduled) questions: {unsupported}")
+    if "mem0" in agent_name.lower() and (
+        agent_config.get("mem0_checkpoint_enabled") or os.environ.get("MEMORYDATA_MEM0_CHECKPOINT_ENABLED") == "1"
+    ):
+        raise ValueError("Mem0 chunk checkpoints assume one ingestion pass; disable them for interleaved datasets")
+
+    _reset_external_persistent_state(agent_config, dataset_config, agent_save_folder, current_context_index)
+    if os.path.exists(agent_save_folder):
+        shutil.rmtree(agent_save_folder)
+    effective_agent_config = dict(agent_config)
+    if "hindsight" in agent_name.lower():
+        from methods.hindsight.hindsight_adapter import fingerprint
+        effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    return AgentWrapper(effective_agent_config, dataset_config, load_agent_from=agent_save_folder)
+
+
+def resume_interleaved_agent(agent_config, dataset_config, agent_save_folder, context_chunks, resume_points):
+    """Reopen an unfinished interleaved Hindsight context instead of rebuilding it.
+
+    resume_points are the history prefix lengths at which the run may continue:
+    question points (and the end of history) no later than the earliest
+    unanswered question. When the saved bank holds exactly one of these
+    prefixes (a settle timeout or a failed question there), it is kept and
+    retain continues after it. Returns (agent, prefix_length) or None, in which
+    case the caller rebuilds the context from its first chunk.
+    """
+    agent_name = str(agent_config.get("agent_name", ""))
+    if "hindsight" not in agent_name.lower() or not os.path.exists(agent_save_folder):
+        return None
+    from methods.hindsight.hindsight_adapter import HindsightAdapter, fingerprint
+    state = HindsightAdapter.read_state(agent_save_folder)
+    if not state or state.get("ready") or not state.get("documents"):
+        return None
+    effective_agent_config = dict(agent_config)
+    effective_agent_config["_hindsight_history_fingerprint"] = fingerprint(context_chunks)
+    try:
+        agent = AgentWrapper(effective_agent_config, dataset_config, load_agent_from=agent_save_folder)
+    except ValueError as exc:  # different configuration/history: rebuild
+        logger.info("Not resuming interleaved Hindsight state in %s: %s", agent_save_folder, exc)
+        return None
+    for prefix_length in sorted(set(resume_points)):
+        if agent.hindsight_expected_documents(context_chunks[:prefix_length]) != state["documents"]:
+            continue
+        try:
+            agent.resume_interleaved_hindsight(context_chunks, prefix_length)
+        except ValueError as exc:
+            logger.info("Not resuming interleaved Hindsight state in %s: %s", agent_save_folder, exc)
+            return None
+        logger.info("Resuming interleaved Hindsight bank after %s retained chunks; waiting for consolidation "
+                    "again instead of retaining from the start", prefix_length)
+        return agent, prefix_length
+    return None
+
+
+def memorize_chunk_range(agent, context_chunks, current_context_index, total_contexts_count, start_chunk_index, end_chunk_index):
+    """Memorize context_chunks[start:end] in order (one segment of an interleaved context)."""
+    return _memorize_context_chunks(
+        agent, context_chunks, current_context_index, total_contexts_count,
+        start_chunk_index=start_chunk_index, end_chunk_index=end_chunk_index,
+    )
+
+
 def _memorize_context_chunks(
     agent,
     context_chunks,
@@ -807,13 +950,15 @@ def _memorize_context_chunks(
     start_chunk_index=0,
     checkpoint_interval=None,
     checkpoint_callback=None,
+    mem0_checkpoint=None,
+    end_chunk_index=None,
 ):
     """Handle the memorization process for context chunks."""
     print("\n\n Agent Memorizing...\n\n")
     progress_description = f"Processing experiments {current_context_index + 1}/{total_contexts_count}"
-    write_times = []
+    write_times = mem0_checkpoint.write_times if mem0_checkpoint else []
 
-    remaining_chunks = context_chunks[start_chunk_index:]
+    remaining_chunks = context_chunks[start_chunk_index:end_chunk_index]
     total_remaining_chunks = len(remaining_chunks)
 
     for processed_offset, chunk in enumerate(
@@ -821,9 +966,19 @@ def _memorize_context_chunks(
         start=1,
     ):
         write_start_time = time.perf_counter()
-        agent.send_message(chunk, memorizing=True, context_id=current_context_index)
+        try:
+            agent.send_message(chunk, memorizing=True, context_id=current_context_index)
+        except Exception as error:
+            if mem0_checkpoint:
+                try:
+                    mem0_checkpoint.record_failure(agent, start_chunk_index + processed_offset - 1, error)
+                except Exception:
+                    logger.exception("Failed to record/close interrupted Mem0 storage; committed snapshot remains authoritative")
+            raise
         write_times.append(time.perf_counter() - write_start_time)
         next_chunk_index = start_chunk_index + processed_offset
+        if mem0_checkpoint:
+            mem0_checkpoint.capture(agent, next_chunk_index, write_times)
         should_checkpoint = (
             checkpoint_callback is not None
             and checkpoint_interval

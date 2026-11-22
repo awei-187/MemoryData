@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 
@@ -5,6 +6,7 @@ from utils.locomo_utils import get_locomo_category_slug
 
 
 _MEMORY_AGENT_HINTS = (
+    "hindsight",
     "mem0",
     "cognee",
     "memtree",
@@ -18,6 +20,25 @@ _MEMORY_AGENT_HINTS = (
     "everos",
     "MemOS",
 )
+
+
+def sanitize_artifact_component(value):
+    """Encode Windows-invalid filename characters without changing source IDs."""
+    return re.sub(r'[<>:"/\\|?*%\x00-\x1f]',
+                  lambda match: f"%{ord(match.group()):02X}", str(value))
+
+
+def existing_or_sanitized_component(parent, value):
+    """A path component for ``value`` (e.g. sub_dataset "longmemeval_s*") under ``parent``.
+
+    Windows rejects "*" in paths, so new directories use the sanitized name. A
+    directory an older run already created under the raw name (possible on
+    POSIX) keeps being used, so existing caches and debug files are found.
+    """
+    raw, safe = str(value), sanitize_artifact_component(value)
+    if raw != safe and parent is not None and os.path.isdir(os.path.join(str(parent), raw)):
+        return raw
+    return safe
 
 
 def resolve_artifact_root(command_line_args=None, agent_config=None):
@@ -74,8 +95,20 @@ def normalize_config_values(raw_value):
     return [str(value).strip() for value in values if str(value).strip()]
 
 
+def is_interleaved_dataset(dataset_config):
+    """Whether questions are asked between history chunks (HaluMem's session protocol)."""
+    return bool(dataset_config.get("interleave_queries"))
+
+
 def get_dataset_variant_components(dataset_config):
     """Return stable dataset-variant suffixes to prevent path collisions."""
+    if str(dataset_config.get("dataset", "")).lower() == "halumem":
+        components = ["interleaved" if is_interleaved_dataset(dataset_config) else "endofhistory"]
+        user_ids = normalize_config_values(dataset_config.get("halumem_user_ids"))
+        if user_ids:
+            digest = hashlib.sha256(",".join(sorted(user_ids)).encode("utf-8")).hexdigest()[:10]
+            components.append(f"users{len(user_ids)}-{digest}")
+        return components
     if str(dataset_config.get("dataset", "")).lower() != "locomo":
         return []
 
@@ -139,7 +172,7 @@ def generate_memory_agent_base_path(agent_config, dataset_config, artifact_root=
     base_path = resolve_results_artifact_path(
         artifact_root,
         "agents",
-        (
+        sanitize_artifact_component(
             f"{agent_name}_{dataset_config['sub_dataset']}{dataset_variant_suffix}"
             f"_chunk{chunk_component}_model{agent_config['model']}{variant_suffix}"
         ),
@@ -159,7 +192,7 @@ def generate_rag_agent_path(agent_config, dataset_config, current_context_index,
     return resolve_results_artifact_path(
         artifact_root,
         "agents",
-        folder_name,
+        sanitize_artifact_component(folder_name),
         f"exp_{current_context_index}",
     )
 
@@ -169,7 +202,7 @@ def generate_default_agent_path(agent_config, dataset_config, current_context_in
     return resolve_results_artifact_path(
         artifact_root,
         "agents",
-        f"{agent_config['agent_name']}_{dataset_config['sub_dataset']}{dataset_variant_suffix}",
+        sanitize_artifact_component(f"{agent_config['agent_name']}_{dataset_config['sub_dataset']}{dataset_variant_suffix}"),
         f"exp_{current_context_index}",
     )
 

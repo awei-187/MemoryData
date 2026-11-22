@@ -28,7 +28,7 @@ class OpenaiManager:
         else:
             self.context_windows = model_name_context_windows["DEFAULT"]
 
-        http_client = httpx.Client(verify=False, trust_env=False)
+        http_client = httpx.Client(verify=False, trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"})
 
         if os.environ.get("OPENROUTER_API_KEY"):  # Use OpenRouter
             self.client = OpenAI(

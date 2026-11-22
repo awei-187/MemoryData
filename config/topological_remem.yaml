@@ -1,0 +1,48 @@
+# REMem (ICLR 2026) builds its episodic memory graph and runs its agentic
+# retrieval in its own conda environment (methods/remem/remem_worker.py);
+# by default MemoryData's answer model answers from what the agent visited.
+agent_name: Agentic_memory_remem
+model: gpt-4o-mini
+model_env: OPENAI_MODEL
+temperature: 0.7
+input_length_limit: 30000
+buffer_length: 1000
+model_context_window: 32768
+output_dir: ./results/outputs/api/topological_remem
+provider: openai_compatible
+api_key_env: OPENAI_API_KEY
+base_url:
+base_url_env: OPENAI_BASE_URL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+tokenizer_encoding: o200k_base
+agent_chunk_size: 4096
+# Recall@k label only: REMem bounds its own context (qa_top_k, agent_max_steps).
+retrieve_num: 20
+
+# Interpreter of the separate REMem environment; REMEM_PYTHON overrides it.
+remem_python: D:/conda/envs/remem/python.exe
+remem_python_env: REMEM_PYTHON
+remem_worker_timeout_seconds: 7200
+# Added per history chunk to the index timeout.
+remem_index_seconds_per_chunk: 300
+# memorydata: MemoryData answer model + shared templates (default, comparable with
+# the other presets); native: REMem's own agent answer (output_answer).
+remem_answer_mode: memorydata
+# Upstream BaseConfig overrides; defaults follow the authors' examples/locomo.py
+# (episodic_gist, agent_max_steps 3, qa_top_k 10, linking_top_k 5, threshold 0.8).
+remem_native_config: {}
+# Resolved from OPENAI_MODEL / OPENAI_EMBEDDING_MODEL by resolve_model_config.
+remem_llm_model: gpt-4o-mini
+remem_embedding_model: text-embedding-3-small
+agent_variant_tag: api-models-v1-remem-episodic-gist-agent
+
+api_only: true
+embedding_model: text-embedding-3-small
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_api_key_env: OPENAI_API_KEY
+embedding_base_url:
+embedding_base_url_env: OPENAI_BASE_URL

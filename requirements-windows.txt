@@ -47,6 +47,7 @@ langchain_google_genai
 
 # AI/LLM APIs
 openai
+httpx>=0.27,<1
 anthropic
 google-genai
 litellm

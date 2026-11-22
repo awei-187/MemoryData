@@ -1,13 +1,13 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>面向记忆增强 Agent 的统一基准测试套件</b></p>
-  <p><i>"一套流水线。四大基准族。二十二种方法预设。一致的执行接口。"</i></p>
+  <p><i>"一套流水线。四大基准族。二十三种方法预设。一致的执行接口。"</i></p>
 </div>
 
 <div align="center">
 
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-  [![Methods](https://img.shields.io/badge/Methods-22%20Presets-7C3AED?style=flat-square)]()
+  [![Methods](https://img.shields.io/badge/Methods-23%20Presets-7C3AED?style=flat-square)]()
   [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
@@ -56,8 +56,12 @@
 
 记忆增强 Agent、结构化记忆架构以及基于检索的基线方法通常各自为战——每篇论文都自带自己的数据加载器、运行时适配器和指标评测工具。结果之间难以横向比较，要在两个方法之间复现同一个评测数值，往往意味着要把两个方法都重新实现一遍。
 
-**MemoryData 正是为填补这一空白而生。** 它是一个面向研究的基准测试套件，将四大基准族（MemoryAgentBench、LoCoMo、LongBench、MemBench）、二十二种方法预设以及共享的运行时统一到一个 `main.py` 启动器之下，使异构的记忆范式能够在一致的执行接口和稳定的产物布局下进行比较。
+**MemoryData 正是为填补这一空白而生。** 它是一个面向研究的基准测试套件，将四大基准族（MemoryAgentBench、LoCoMo、LongBench、MemBench）、二十三种方法预设以及共享的运行时统一到一个 `main.py` 启动器之下，使异构的记忆范式能够在一致的执行接口和稳定的产物布局下进行比较。
 
+
+**新增 Hindsight：** 使用 `config/hybrid_hindsight.yaml` 搭配现有数据集 YAML 即可选择该方法。原生 `retain` / `recall` 负责记忆写入与检索，MemoryData 回答模型生成最终答案；支持独立 bank、来源追踪、保存恢复和 `--force` 清理。需要另行启动 Hindsight 服务。完整命令和验证边界见 [接入指南](docs/hindsight.md)。
+
+全部预设现从根 `.env` 读取统一的远程模型配置：`gpt-4o-mini` 和 `text-embedding-3-small`（1536 维），替代原本的本地模型端点。各方法检索数量和预算仍保留原值；MemoRAG 依赖本地核心模型，API 模式下会明确拒绝运行。配置、服务边界和验证方式见 [统一 API 配置指南](docs/api_models.md)。
 
 ## 📚 特性
 
@@ -72,8 +76,8 @@
 </td>
 <td width="50%">
 
-**🧩 22 种方法预设**
-扁平化的 YAML 预设覆盖参考基线、序列上下文、结构拓扑、多范式混合四类架构——每一种都已接入对应的内嵌（vendored）运行时。
+**🧩 23 种方法预设**
+扁平化的 YAML 预设覆盖参考基线、序列上下文、结构拓扑、多范式混合四类架构，通过本地运行时或服务适配器接入。
 
 </td>
 </tr>
@@ -126,11 +130,16 @@ conda activate memory-bench
 
 ### 第二步：配置模型端点与密钥
 
-大多数预设默认使用 OpenAI 兼容的推理端点。请修改 `config/` 下的 YAML 文件，使 `model`、`base_url`、`embedding_base_url` 及相关 provider 字段与你环境中可用的模型服务相匹配。
+在项目根 `.env` 填写远程 API 配置；没有文件时参考 [.env.example](.env.example)，已有文件时保留密钥。默认预设通过环境变量统一解析回答模型和嵌入模型，无需逐个修改 YAML 的本地端口。完整说明见 [统一 API 配置](docs/api_models.md)。
 
 | 变量 | 使用方 | 说明 |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | 大多数预设 | 用于对话与嵌入调用的默认密钥变量 |
+| `OPENAI_BASE_URL` | 全部 API 预设 | 远程 OpenAI 兼容 API 地址 |
+| `OPENAI_MODEL` | 全部 API 预设 | 默认 `gpt-4o-mini` |
+| `OPENAI_EMBEDDING_MODEL` | 使用嵌入的预设 | 默认 `text-embedding-3-small` |
+| `OPENAI_EMBEDDING_DIMENSIONS` | 向量库 | 默认 1536，须匹配实际输出 |
+| `OPENAI_API_TRUST_ENV` | 模型 API 客户端 | 默认 `true`，支持使用已有系统代理 |
 | `OPENAI_API_BASE` | MemOS 示例环境 | 使用 MemOS 专属配置时请参考 `methods/MemOS/config/.env.example` |
 
 ### 第三步：准备数据集
@@ -143,6 +152,7 @@ conda activate memory-bench
 | LoCoMo | `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` | JSON 文件 | 供完整版及按类别的 LoCoMo 预设使用 |
 | LongBench | `datasets/longBench_rep150_proportional/datasets` | HuggingFace `save_to_disk` 目录 | 对应按比例采样的子集 |
 | MemBench | `datasets/MemBench/MemData/FirstAgent/*.json` | JSON 文件 | `simple`、`noisy`、`knowledge_update`、`highlevel`、`RecMultiSession` |
+| HaluMem | `datasets/HaluMem/HaluMem-Medium.jsonl`（Long 版同目录） | JSON Lines，每行一个用户 | 问答任务，逐 session 交错提问，判分见 [HaluMem 接入说明](docs/halumem.md) |
 
 参考目录结构：
 
@@ -200,6 +210,7 @@ project-root/
 ├── evaluation/
 │   └── longmemeval/               # 保留的 LongMemEval 外挂评测辅助代码
 ├── methods/                        # 按论文分类组织的方法运行时
+│   ├── hindsight/                  # native REST retain/recall; separately deployed server
 │   ├── embedding_rag/              # 稠密检索参考基线
 │   ├── memagent/  mem0/  memochat/ # 序列上下文架构
 │   ├── cognee/  graph_rag/  hipporag/  memtree/  raptor/  zep/  zep_local/ # 结构拓扑架构
@@ -230,6 +241,7 @@ project-root/
 | 结构拓扑架构 | RAPTOR | `topological_raptor.yaml` | `methods/raptor/raptor.py` | 分层聚类并摘要的检索基线 |
 | 结构拓扑架构 | Zep | `topological_zep.yaml` | `methods/zep/zep.py` | 云端图记忆集成 |
 | 多范式混合架构 | Letta | `hybrid_letta.yaml` | `utils/agent.py` | 通过内嵌（vendored）的 Letta 源码与本地运行时管理集成 |
+| 多范式混合架构 | Hindsight | `hybrid_hindsight.yaml` | `methods/hindsight/hindsight_adapter.py` | 原生 retain/recall，远端 bank 隔离，复用 MemoryData 回答模型 |
 | 多范式混合架构 | LightMem | `hybrid_lightmem.yaml` | `methods/lightmem/lightmem_adapter.py` | 分层的记忆构建与检索 |
 | 多范式混合架构 | SimpleMem | `hybrid_simplemem.yaml` | `methods/simplemem/simplemem_adapter.py` | 语义、关键词、结构化检索的混合方案 |
 | 多范式混合架构 | MemOS | `hybrid_memos.yaml` | `methods/MemOS/source/src/` | 内嵌的记忆操作系统运行时 |
@@ -250,6 +262,7 @@ project-root/
 | LoCoMo | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat1_multi_hop.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat2_temporal.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat3_open_domain.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat4_single_hop.yaml` | 在长对话上进行对话式问答，提供完整版与按类别的子集 | JSON 文件，通常为 `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` |
 | LongBench | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | 在当前预设所使用的按比例采样子集上进行长上下文多选题推理 | HuggingFace `save_to_disk` 目录，通常为 `datasets/longBench_rep150_proportional/datasets` |
 | MemBench | `benchmark/membench/config/MemBench_simple.yaml`<br>`benchmark/membench/config/MemBench_noisy.yaml`<br>`benchmark/membench/config/MemBench_knowledge_update.yaml`<br>`benchmark/membench/config/MemBench_highlevel.yaml`<br>`benchmark/membench/config/MemBench_RecMultiSession.yaml` | 记忆压力测试，覆盖简单回忆、噪声、知识更新、高层次推理以及多会话推荐 | 位于 `datasets/MemBench/MemData/FirstAgent/` 下的各切片 JSON 文件 |
+| HaluMem | `benchmark/halumem/config/HaluMem_medium.yaml`<br>`benchmark/halumem/config/HaluMem_medium_user1.yaml`<br>`benchmark/halumem/config/HaluMem_long.yaml` | 记忆系统问答幻觉：每个 session 写入后立即回答该 session 的问题，官方判分给出正确/幻觉/遗漏率 | `datasets/HaluMem/HaluMem-Medium.jsonl`；Long 版需另行下载 |
 
 
 ## ⚙️ 配置约定

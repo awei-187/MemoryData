@@ -33,7 +33,7 @@ class TextEmbedderOpenAI:
     def __init__(self, config: Optional[BaseTextEmbedderConfig] = None):
         self.config = config
         self.model = getattr(config, "model", None) or "text-embedding-3-small"        
-        http_client = httpx.Client(verify=False)
+        http_client = httpx.Client(verify=False, trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"})
         api_key = self.config.api_key 
         base_url = self.config.openai_base_url
         self.client = OpenAI(

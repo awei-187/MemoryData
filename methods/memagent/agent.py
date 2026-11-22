@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
+from utils.provider_utils import resolve_base_url
 
 from .recurrent import MemAgentRecurrentRunner, RecurrentConfig
 
@@ -11,6 +12,7 @@ class MemAgent7B:
     base_url: str
     api_key: str = "123-abc"
     tokenizer_model: Optional[str] = None
+    tokenizer_encoding: Optional[str] = None
     recurrent_chunk_size: int = 5000
     recurrent_max_new: int = 1024
     recurrent_max_context_len: int = 120000
@@ -24,6 +26,7 @@ class MemAgent7B:
                 base_url=self.base_url,
                 api_key=self.api_key,
                 tokenizer_model=self.tokenizer_model,
+                tokenizer_encoding=self.tokenizer_encoding,
                 recurrent_chunk_size=self.recurrent_chunk_size,
                 recurrent_max_new=self.recurrent_max_new,
                 recurrent_max_context_len=self.recurrent_max_context_len,
@@ -43,9 +46,10 @@ def build_memagent(config: Any) -> MemAgent7B:
 
     return MemAgent7B(
         model=config["model"],
-        base_url=config["base_url"],
+        base_url=resolve_base_url(config.get("base_url"), config.get("base_url_env")),
         api_key=resolved_api_key,
         tokenizer_model=config.get("tokenizer_model"),
+        tokenizer_encoding=config.get("tokenizer_encoding"),
         recurrent_chunk_size=config.get("recurrent_chunk_size", 5000),
         recurrent_max_new=config.get("recurrent_max_new", 1024),
         recurrent_max_context_len=config.get("recurrent_max_context_len", 120000),

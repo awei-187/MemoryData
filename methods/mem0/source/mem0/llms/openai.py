@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 import httpx
 from openai import OpenAI
+from utils.provider_utils import model_api_request_options
 
 from mem0.configs.llms.base import BaseLlmConfig
 from mem0.llms.base import LLMBase
@@ -17,13 +18,17 @@ class OpenAILLM(LLMBase):
         if not self.config.model:
             self.config.model = "gpt-4o-mini"
 
-        if os.environ.get("OPENROUTER_API_KEY"):  # Use OpenRouter
+        self._use_openrouter = bool(os.environ.get("OPENROUTER_API_KEY")) and not (
+            self.config.api_key or self.config.openai_base_url
+        )
+        if self._use_openrouter:
             self.client = OpenAI(
                 api_key=os.environ.get("OPENROUTER_API_KEY"),
                 base_url=self.config.openrouter_base_url
                 or os.getenv("OPENROUTER_API_BASE")
                 or "https://openrouter.ai/api/v1",
-                http_client=httpx.Client(trust_env=False),
+                http_client=httpx.Client(trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"}),
+                **model_api_request_options(),
             )
         else:
             api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
@@ -43,7 +48,8 @@ class OpenAILLM(LLMBase):
             self.client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
-                http_client=httpx.Client(trust_env=False),
+                http_client=httpx.Client(trust_env=os.getenv("OPENAI_API_TRUST_ENV", "false").strip().lower() in {"true", "1"}),
+                **model_api_request_options(),
             )
 
     def _resolved_base_url(self) -> str:
@@ -127,7 +133,7 @@ class OpenAILLM(LLMBase):
             "top_p": self.config.top_p,
         }
 
-        if os.getenv("OPENROUTER_API_KEY"):
+        if self._use_openrouter:
             openrouter_params = {}
             if self.config.models:
                 openrouter_params["models"] = self.config.models
@@ -150,5 +156,14 @@ class OpenAILLM(LLMBase):
             params["tool_choice"] = tool_choice
         self._inject_dashscope_non_streaming_defaults(params)
 
-        response = self.client.chat.completions.create(**params)
+        try:
+            response = self.client.chat.completions.create(**params)
+        except Exception as error:
+            # Optional diagnostic sidecar only; never alter retry/error behavior.
+            try:
+                from utils.model_api_diagnostics import record_api_error
+                record_api_error(error, params)
+            except Exception:
+                pass  # A diagnostic failure must not replace the original error.
+            raise
         return self._parse_response(response, tools)

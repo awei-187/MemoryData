@@ -1,26 +1,26 @@
 # -- required (benchmark framework) -----------------------------------------
 agent_name: MemOS_general_text
-model: qwen/qwen-2.5-7b-instruct
+model: gpt-4o-mini
 temperature: 0.0
 input_length_limit: 10000000
 buffer_length: 1000
-output_dir: ./results/outputs/gpt-4o-mini-MemOS
+output_dir: ./results/outputs/api/hybrid_memos
 agent_chunk_size: 4096    # framework-level compatibility field; MemOS internal chunking uses chunk_size below
 
 retrieve_num: 10
 
 # -- provider / API (standard framework fields) ----------------------------
 provider: openai_compatible
-api_key_env: OPENAI_API_KEY          # env var name holding the API key
-base_url: "https://openrouter.ai/api/v1"
+api_key_env: OPENAI_API_KEY
+base_url:
 
 # -- embedding (defaults to OpenAI official endpoint) -----------------------
-embedding_base_url: "https://openrouter.ai/api/v1"
+embedding_base_url:
 embedding_api_key_env: OPENAI_API_KEY
 
 # -- MemOS-specific ---------------------------------------------------------
 text_mem_type: general_text      # "general_text" or "tree_text"
-embedder_model: openai/text-embedding-3-large
+embedder_model: text-embedding-3-small
 chunk_size: 512
 chunk_overlap: 128
 max_turns_window: 20
@@ -31,3 +31,16 @@ enable_mem_scheduler: false
 
 # PRO mode - Chain of Thought decomposition for complex queries
 pro_mode: false
+model_env: OPENAI_MODEL
+base_url_env: OPENAI_BASE_URL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+tokenizer_encoding: o200k_base
+agent_variant_tag: api-models-v1
+embedding_model: text-embedding-3-small
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_base_url_env: OPENAI_BASE_URL

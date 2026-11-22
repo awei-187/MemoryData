@@ -157,6 +157,19 @@ class SimpleMemAdapter:
         Path(self.db_path).mkdir(parents=True, exist_ok=True)
         self.system.finalize()
 
+    def flush_for_queries(self) -> None:
+        """Make everything added so far searchable before an interleaved question point.
+
+        finalize() flushes the dialogue buffer. The LanceDB full-text index is
+        created once after the first insert, so it is recreated here to cover
+        rows added later; this is skipped when FTS was never enabled.
+        """
+        self.finalize()
+        store = self.system.vector_store
+        if getattr(store, "_fts_initialized", False) and getattr(store, "_fts_enabled", False):
+            store._fts_initialized = False
+            store._init_fts_index()
+
     def ask(self, question: str) -> str:
         return self.system.ask(question)
 

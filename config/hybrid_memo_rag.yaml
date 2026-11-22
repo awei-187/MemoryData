@@ -1,20 +1,20 @@
 # ── required ──────────────────────────────────────────────────────────────────
 agent_name: Structure_rag_memo_rag
-model: Qwen2.5-7B
+model: gpt-4o-mini
 temperature: 0.7
 input_length_limit: 800000
 buffer_length: 200
-output_dir: ./results/outputs/Qwen2.5-7B-memo_rag
+output_dir: ./results/outputs/api/hybrid_memo_rag
 retrieve_num: 3
 
 # ── optional ──────────────────────────────────────────────────────────────────
-provider: openai_compatible    # openai(default) | openai_compatible | azure_openai
-api_key_env: OPENAI_API_KEY    # env var name for API key (default: OPENAI_API_KEY)
-base_url: http://127.0.0.1:9909/v1    # custom LLM endpoint
-base_url_env:       # env var name for base_url
+provider: openai_compatible
+api_key_env: OPENAI_API_KEY
+base_url:
+base_url_env: OPENAI_BASE_URL
 azure_endpoint:
 azure_api_version:
-tokenizer_encoding: cl100k_base  # e.g. cl100k_base
+tokenizer_encoding: o200k_base
 memorag_cuda_visible_devices: "3,4,5,6"    # was unset; uses CUDA_VISIBLE_DEVICES semantics for MemoRAG model loading
 memorag_cache_dir: ./.runtime-cache/hf    # local Hugging Face cache for MemoRAG models
 memorag_mem_model_name_or_path: TommyChien/memorag-qwen2-7b-inst    # was hardcoded in utils/agent.py
@@ -26,3 +26,8 @@ memorag_max_context_tokens: 120000    # was unlimited (entire context); keep bel
 memorag_truncation_strategy: head_tail    # was full context; options: head, tail, head_tail
 memorag_context_token_reserve: 16384    # was 0; leave room for MemoRAG prompt wrappers and tokenizer drift
 memorag_save_cache: true    # was effectively false because the build path never wrote memory/index files
+model_env: OPENAI_MODEL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+agent_variant_tag: api-models-v1

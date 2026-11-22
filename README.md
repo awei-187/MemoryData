@@ -1,13 +1,13 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>A Unified Memory Benchmark Suite for Memory-Augmented Agents</b></p>
-  <p><i>"One pipeline. Four benchmark families. Twenty-two method presets. One consistent execution interface."</i></p>
+  <p><i>"One pipeline. Four benchmark families. Twenty-three method presets. One consistent execution interface."</i></p>
 </div>
 
 <div align="center">
 
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-  [![Methods](https://img.shields.io/badge/Methods-22%20Presets-7C3AED?style=flat-square)]()
+  [![Methods](https://img.shields.io/badge/Methods-23%20Presets-7C3AED?style=flat-square)]()
   [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
@@ -56,8 +56,12 @@
 
 Memory-augmented agents, structured memory architectures, and retrieval-based baselines are usually evaluated in isolation — each paper ships its own loader, its own runtime adapter, and its own metric harness. Results are hard to compare, and reproducing a single number across two methods often means re-implementing both.
 
-**MemoryData closes that gap.** It is a research-oriented benchmark suite that unifies four benchmark families (MemoryAgentBench, LoCoMo, LongBench, MemBench), twenty-two method presets, and a shared runtime under a single `main.py` launcher, so that heterogeneous memory formulations can be compared under one consistent execution interface and one stable artifact layout.
+**MemoryData closes that gap.** It is a research-oriented benchmark suite that unifies four benchmark families (MemoryAgentBench, LoCoMo, LongBench, MemBench), twenty-three method presets, and a shared runtime under a single `main.py` launcher, so that heterogeneous memory formulations can be compared under one consistent execution interface and one stable artifact layout.
 
+
+**Hindsight integration:** use `config/hybrid_hindsight.yaml` with any existing dataset YAML. Native Hindsight `retain`/`recall` manage memory; the configured MemoryData model generates final answers. Isolated banks, provenance, save/resume and `--force` cleanup are supported. A running Hindsight service is required; server deployment is separate. See the [integration and validation guide](docs/hindsight.md).
+
+All presets now read shared remote model settings from the root `.env`: `gpt-4o-mini` and `text-embedding-3-small` (1536 dimensions), replacing the previous local model endpoints. Retrieval counts and budgets retain their method-specific values. MemoRAG still requires local core models and explicitly refuses API-only execution. See the [shared API configuration guide](docs/api_models.md) for service boundaries and validation.
 
 ## 📚 Features
 
@@ -72,8 +76,8 @@ Memory-augmented agents, structured memory architectures, and retrieval-based ba
 </td>
 <td width="50%">
 
-**🧩 22 Method Presets**
-Flattened YAML presets span reference baselines, sequential context, structural topological, and multi-paradigm hybrid architectures — each wired to its vendored runtime.
+**🧩 23 Method Presets**
+Flattened YAML presets span reference baselines, sequential context, structural topological, and multi-paradigm hybrid architectures, connected through local runtime or service adapters.
 
 </td>
 </tr>
@@ -126,11 +130,16 @@ conda activate memory-bench
 
 ### Step 2: Configure model endpoints and keys
 
-Most presets assume OpenAI-compatible serving endpoints. Update the YAML files in `config/` so that `model`, `base_url`, `embedding_base_url`, and related provider fields match the model servers available in your environment.
+Configure the remote API in the project root `.env`. Use [.env.example](.env.example) as a template if needed; preserve existing credentials. Presets resolve shared chat and embedding models from environment variables. See the [API configuration guide](docs/api_models.md).
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Most presets | Default key variable for chat and embedding calls |
+| `OPENAI_BASE_URL` | All API presets | Remote OpenAI-compatible API endpoint |
+| `OPENAI_MODEL` | All API presets | Defaults to `gpt-4o-mini` |
+| `OPENAI_EMBEDDING_MODEL` | Embedding-based presets | Defaults to `text-embedding-3-small` |
+| `OPENAI_EMBEDDING_DIMENSIONS` | Vector stores | Defaults to 1536; must match actual output |
+| `OPENAI_API_TRUST_ENV` | Model API clients | Defaults to `true`; uses existing proxy environment |
 | `OPENAI_API_BASE` | MemOS example environment | Refer to `methods/MemOS/config/.env.example` when using MemOS-specific setup |
 
 ### Step 3: Prepare datasets
@@ -143,6 +152,7 @@ Datasets are **not** bundled with this repository. Place them under `datasets/` 
 | LoCoMo | `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` | JSON file | Used by the full and category-specific LoCoMo presets |
 | LongBench | `datasets/longBench_rep150_proportional/datasets` | HuggingFace `save_to_disk` directory | Targets the proportional subset |
 | MemBench | `datasets/MemBench/MemData/FirstAgent/*.json` | JSON files | `simple`, `noisy`, `knowledge_update`, `highlevel`, `RecMultiSession` |
+| HaluMem | `datasets/HaluMem/HaluMem-Medium.jsonl` (Long in the same folder) | JSON Lines, one user per line | QA task with session-interleaved questions; see [docs/halumem.md](docs/halumem.md) |
 
 Reference layout:
 
@@ -200,6 +210,7 @@ project-root/
 ├── evaluation/
 │   └── longmemeval/               # retained LongMemEval sidecar evaluation helpers
 ├── methods/                        # method runtimes grouped by the paper taxonomy
+│   ├── hindsight/                  # native REST retain/recall; separately deployed server
 │   ├── embedding_rag/              # reference dense-retrieval baseline
 │   ├── memagent/  mem0/  memochat/ # sequential context architectures
 │   ├── cognee/  graph_rag/  hipporag/  memtree/  raptor/  zep/  zep_local/ # structural topological architectures
@@ -230,6 +241,7 @@ The taxonomy below follows the grouping used in the main RQ1 effectiveness table
 | Structural Topological Architectures | RAPTOR | `topological_raptor.yaml` | `methods/raptor/raptor.py` | Hierarchical cluster-and-summarize retrieval baseline |
 | Structural Topological Architectures | Zep | `topological_zep.yaml` | `methods/zep/zep.py` | Cloud-backed graph-memory integration |
 | Multi-Paradigm Hybrid Architectures | Letta | `hybrid_letta.yaml` | `utils/agent.py` | Integrated through vendored Letta source and local runtime management |
+| Multi-Paradigm Hybrid Architectures | Hindsight | `hybrid_hindsight.yaml` | `methods/hindsight/hindsight_adapter.py` | Native retain/recall with isolated banks; shared MemoryData answer model |
 | Multi-Paradigm Hybrid Architectures | LightMem | `hybrid_lightmem.yaml` | `methods/lightmem/lightmem_adapter.py` | Layered memory construction and retrieval |
 | Multi-Paradigm Hybrid Architectures | SimpleMem | `hybrid_simplemem.yaml` | `methods/simplemem/simplemem_adapter.py` | Hybrid semantic, keyword, and structured retrieval |
 | Multi-Paradigm Hybrid Architectures | MemOS | `hybrid_memos.yaml` | `methods/MemOS/source/src/` | Vendored memory operating system runtime |
@@ -250,6 +262,7 @@ The taxonomy below follows the grouping used in the main RQ1 effectiveness table
 | LoCoMo | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat1_multi_hop.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat2_temporal.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat3_open_domain.yaml`<br>`benchmark/locomo/config/Locomo_qa_4cat_600_dist_cat4_single_hop.yaml` | Conversational QA over long dialogues, with full and category-specific subsets | JSON file, typically `datasets/LoCoMo/rq1_4cat_600_dist/locomo_4cat_600_dist.json` |
 | LongBench | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | Long-context multiple-choice reasoning on the proportional subset used by the current preset | HuggingFace `save_to_disk` directory, typically `datasets/longBench_rep150_proportional/datasets` |
 | MemBench | `benchmark/membench/config/MemBench_simple.yaml`<br>`benchmark/membench/config/MemBench_noisy.yaml`<br>`benchmark/membench/config/MemBench_knowledge_update.yaml`<br>`benchmark/membench/config/MemBench_highlevel.yaml`<br>`benchmark/membench/config/MemBench_RecMultiSession.yaml` | Memory stress tests covering simple recall, noise, knowledge updates, high-level reasoning, and multi-session recommendation | Slice-specific JSON files under `datasets/MemBench/MemData/FirstAgent/` |
+| HaluMem | `benchmark/halumem/config/HaluMem_medium.yaml`<br>`benchmark/halumem/config/HaluMem_medium_user1.yaml`<br>`benchmark/halumem/config/HaluMem_long.yaml` | Memory-system QA hallucination: each session's questions are answered right after that session is memorized; the official judge reports correct / hallucination / omission rates | `datasets/HaluMem/HaluMem-Medium.jsonl`; download the Long file separately |
 
 
 ## ⚙️ Configuration Conventions

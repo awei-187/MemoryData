@@ -1,17 +1,35 @@
 agent_name: Agentic_memory_lightmem
-model: Qwen3-8B    # local Qwen3-8B vLLM service
+model: gpt-4o-mini
 temperature: 0.0
 input_length_limit: 10000000
 buffer_length: 1000
-output_dir: ./results/outputs/Qwen3-8B-lightmem
+output_dir: ./results/outputs/api/hybrid_lightmem
 agent_chunk_size: 4096
 
-retrieve_num: 10  
+retrieve_num: 10
 lightmem_ingest_mode: direct
-lightmem_base_url: http://127.0.0.1:9910/v1    # local Qwen3-8B chat service for overnight lane 3
+lightmem_base_url:
 lightmem_api_key_env: OPENAI_API_KEY
-lightmem_embedding_backend: huggingface
-lightmem_embedding_model: sentence-transformers/all-MiniLM-L6-v2
-lightmem_embedding_dims: 384
+lightmem_embedding_backend: openai
+lightmem_embedding_model: text-embedding-3-small
+lightmem_embedding_dims: 1536
 lightmem_memory_manager_backend: openai
 lightmem_qdrant_on_disk: true
+model_env: OPENAI_MODEL
+provider: openai_compatible
+api_key_env: OPENAI_API_KEY
+base_url:
+base_url_env: OPENAI_BASE_URL
+model_api_trust_env: true
+model_api_trust_env_env: OPENAI_API_TRUST_ENV
+api_only: true
+tokenizer_encoding: o200k_base
+agent_variant_tag: api-models-v1
+embedding_model: text-embedding-3-small
+embedding_model_env: OPENAI_EMBEDDING_MODEL
+embedding_dim: 1536
+embedding_dim_env: OPENAI_EMBEDDING_DIMENSIONS
+embedding_provider: openai_compatible
+embedding_api_key_env: OPENAI_API_KEY
+embedding_base_url:
+embedding_base_url_env: OPENAI_BASE_URL
