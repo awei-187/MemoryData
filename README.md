@@ -1,14 +1,14 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>A Unified Memory Benchmark Suite for Memory-Augmented Agents</b></p>
-  <p><i>"One pipeline. Four benchmark families. Twenty-three method presets. One consistent execution interface."</i></p>
+  <p><i>"One pipeline. Five benchmark families. Twenty-five method presets. One consistent execution interface."</i></p>
 </div>
 
 <div align="center">
 
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-  [![Methods](https://img.shields.io/badge/Methods-23%20Presets-7C3AED?style=flat-square)]()
-  [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
+  [![Methods](https://img.shields.io/badge/Methods-25%20Presets-7C3AED?style=flat-square)]()
+  [![Benchmarks](https://img.shields.io/badge/Benchmarks-5%20Families-F97316?style=flat-square)]()
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
 
@@ -56,10 +56,14 @@
 
 Memory-augmented agents, structured memory architectures, and retrieval-based baselines are usually evaluated in isolation — each paper ships its own loader, its own runtime adapter, and its own metric harness. Results are hard to compare, and reproducing a single number across two methods often means re-implementing both.
 
-**MemoryData closes that gap.** It is a research-oriented benchmark suite that unifies four benchmark families (MemoryAgentBench, LoCoMo, LongBench, MemBench), twenty-three method presets, and a shared runtime under a single `main.py` launcher, so that heterogeneous memory formulations can be compared under one consistent execution interface and one stable artifact layout.
+**MemoryData closes that gap.** It is a research-oriented benchmark suite that unifies five benchmark families (MemoryAgentBench, LoCoMo, LongBench, MemBench, HaluMem), twenty-five method presets, and a shared runtime under a single `main.py` launcher, so that heterogeneous memory formulations can be compared under one consistent execution interface and one stable artifact layout.
 
 
 **Hindsight integration:** use `config/hybrid_hindsight.yaml` with any existing dataset YAML. Native Hindsight `retain`/`recall` manage memory; the configured MemoryData model generates final answers. Isolated banks, provenance, save/resume and `--force` cleanup are supported. A running Hindsight service is required; server deployment is separate. See the [integration and validation guide](docs/hindsight.md).
+
+**REMem and TSM integration:** `config/topological_remem.yaml` and `config/topological_tsm.yaml` run the authors' released code unchanged in its own conda environment (their pinned dependencies conflict with MemoryData's), driven through a JSON-lines worker bridge (`methods/worker_bridge.py`); credentials reach the worker only through its environment. TSM additionally needs a local Neo4j. Both build their index once from the complete history, so session-interleaved datasets are refused. TSM release 0.1.1 does not run as published: MemoryData applies documented runtime compatibility shims and two logic fixes, and tags those results `mdpatch1`. See [docs/remem.md](docs/remem.md) and [docs/tsm.md](docs/tsm.md).
+
+**HaluMem:** session-interleaved memory QA. Each session's questions are asked right after that session is memorized; the official correct / hallucination / omission judge is a separate, explicitly invoked step. See [docs/halumem.md](docs/halumem.md).
 
 All presets now read shared remote model settings from the root `.env`: `gpt-4o-mini` and `text-embedding-3-small` (1536 dimensions), replacing the previous local model endpoints. Retrieval counts and budgets retain their method-specific values. MemoRAG still requires local core models and explicitly refuses API-only execution. See the [shared API configuration guide](docs/api_models.md) for service boundaries and validation.
 
@@ -76,7 +80,7 @@ All presets now read shared remote model settings from the root `.env`: `gpt-4o-
 </td>
 <td width="50%">
 
-**🧩 23 Method Presets**
+**🧩 25 Method Presets**
 Flattened YAML presets span reference baselines, sequential context, structural topological, and multi-paradigm hybrid architectures, connected through local runtime or service adapters.
 
 </td>
@@ -84,8 +88,8 @@ Flattened YAML presets span reference baselines, sequential context, structural 
 <tr>
 <td>
 
-**📊 4 Benchmark Families**
-MemoryAgentBench, LoCoMo, LongBench, and MemBench, each with full and category-specific or slice-specific configs ready to run.
+**📊 5 Benchmark Families**
+MemoryAgentBench, LoCoMo, LongBench, MemBench, and HaluMem, each with full and category-specific or slice-specific configs ready to run.
 
 </td>
 <td>
@@ -128,6 +132,8 @@ conda activate memory-bench
 | Linux / macOS | `pip install -r requirements.txt` |
 | Windows | `pip install -r requirements-windows.txt` |
 
+REMem and TSM run in their own environments (`methods/remem/requirements-remem.txt`, `methods/tsm/requirements-tsm.txt`), set by `remem_python` / `tsm_python` in their presets; TSM also needs a running Neo4j (5.x or a newer calendar release; smoke-tested with 2026.09). Hindsight needs its separately deployed service. Setup steps are in the per-method guides under `docs/`.
+
 ### Step 2: Configure model endpoints and keys
 
 Configure the remote API in the project root `.env`. Use [.env.example](.env.example) as a template if needed; preserve existing credentials. Presets resolve shared chat and embedding models from environment variables. See the [API configuration guide](docs/api_models.md).
@@ -140,6 +146,7 @@ Configure the remote API in the project root `.env`. Use [.env.example](.env.exa
 | `OPENAI_EMBEDDING_MODEL` | Embedding-based presets | Defaults to `text-embedding-3-small` |
 | `OPENAI_EMBEDDING_DIMENSIONS` | Vector stores | Defaults to 1536; must match actual output |
 | `OPENAI_API_TRUST_ENV` | Model API clients | Defaults to `true`; uses existing proxy environment |
+| `NEO4J_PASSWORD` | TSM | Password of the local Neo4j used by Graphiti; read from the environment only |
 | `OPENAI_API_BASE` | MemOS example environment | Refer to `methods/MemOS/config/.env.example` when using MemOS-specific setup |
 
 ### Step 3: Prepare datasets
@@ -186,6 +193,8 @@ Representative runs:
 | LoCoMo evaluation | `config/hybrid_simplemem.yaml` | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml` | - |
 | LongBench evaluation | `config/reference_embedding_rag.yaml` | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | - |
 | MemBench evaluation | `config/sequential_mem0.yaml` | `benchmark/membench/config/MemBench_simple.yaml` | - |
+| HaluMem evaluation | `config/hybrid_hindsight.yaml` | `benchmark/halumem/config/HaluMem_medium.yaml` | judge afterwards with `python -m evaluation.halumem.evaluate_halumem_judge <results.json>` |
+| REMem / TSM smoke run | `config/topological_remem.yaml` or `config/topological_tsm.yaml` | `benchmark/memoryagentbench/Accurate_Retrieval/config/LongMemEval/Longmemeval_s.yaml` | `--max_test_queries_ablation 2` |
 
 Example:
 
@@ -206,11 +215,15 @@ project-root/
 │   ├── memoryagentbench/          # MemoryAgentBench loaders and benchmark configs
 │   ├── locomo/                    # LoCoMo configs and JSON loader
 │   ├── longbench/                 # LongBench proportional-subset support
-│   └── membench/                  # MemBench slice configs and loader
+│   ├── membench/                  # MemBench slice configs and loader
+│   └── halumem/                   # HaluMem loader and session-interleaved configs
 ├── evaluation/
-│   └── longmemeval/               # retained LongMemEval sidecar evaluation helpers
+│   ├── longmemeval/               # retained LongMemEval sidecar evaluation helpers
+│   └── halumem/                   # HaluMem QA judge (separate step)
 ├── methods/                        # method runtimes grouped by the paper taxonomy
 │   ├── hindsight/                  # native REST retain/recall; separately deployed server
+│   ├── remem/  tsm/                # adapters + workers running the authors' code in separate environments
+│   ├── worker_bridge.py            # JSON-lines bridge to those workers (lifecycle, credentials via env)
 │   ├── embedding_rag/              # reference dense-retrieval baseline
 │   ├── memagent/  mem0/  memochat/ # sequential context architectures
 │   ├── cognee/  graph_rag/  hipporag/  memtree/  raptor/  zep/  zep_local/ # structural topological architectures
@@ -240,6 +253,8 @@ The taxonomy below follows the grouping used in the main RQ1 effectiveness table
 | Structural Topological Architectures | HippoRAG | `topological_hippo_rag_v2_openai.yaml` | `methods/hipporag/` | Retrieval over graph-style document organization |
 | Structural Topological Architectures | RAPTOR | `topological_raptor.yaml` | `methods/raptor/raptor.py` | Hierarchical cluster-and-summarize retrieval baseline |
 | Structural Topological Architectures | Zep | `topological_zep.yaml` | `methods/zep/zep.py` | Cloud-backed graph-memory integration |
+| Structural Topological Architectures | REMem | `topological_remem.yaml` | `methods/remem/remem_adapter.py` | Episodic gist/fact hybrid graph with agentic (ReAct) retrieval; authors' code in a separate environment |
+| Structural Topological Architectures | TSM | `topological_tsm.yaml` | `methods/tsm/tsm_adapter.py` | Temporal knowledge graph (Graphiti + Neo4j) with monthly semantic snapshots; release 0.1.1 with documented MemoryData patches |
 | Multi-Paradigm Hybrid Architectures | Letta | `hybrid_letta.yaml` | `utils/agent.py` | Integrated through vendored Letta source and local runtime management |
 | Multi-Paradigm Hybrid Architectures | Hindsight | `hybrid_hindsight.yaml` | `methods/hindsight/hindsight_adapter.py` | Native retain/recall with isolated banks; shared MemoryData answer model |
 | Multi-Paradigm Hybrid Architectures | LightMem | `hybrid_lightmem.yaml` | `methods/lightmem/lightmem_adapter.py` | Layered memory construction and retrieval |

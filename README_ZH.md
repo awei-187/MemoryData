@@ -1,14 +1,14 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>面向记忆增强 Agent 的统一基准测试套件</b></p>
-  <p><i>"一套流水线。四大基准族。二十三种方法预设。一致的执行接口。"</i></p>
+  <p><i>"一套流水线。五大基准族。二十五种方法预设。一致的执行接口。"</i></p>
 </div>
 
 <div align="center">
 
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-  [![Methods](https://img.shields.io/badge/Methods-23%20Presets-7C3AED?style=flat-square)]()
-  [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
+  [![Methods](https://img.shields.io/badge/Methods-25%20Presets-7C3AED?style=flat-square)]()
+  [![Benchmarks](https://img.shields.io/badge/Benchmarks-5%20Families-F97316?style=flat-square)]()
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
 
@@ -56,10 +56,14 @@
 
 记忆增强 Agent、结构化记忆架构以及基于检索的基线方法通常各自为战——每篇论文都自带自己的数据加载器、运行时适配器和指标评测工具。结果之间难以横向比较，要在两个方法之间复现同一个评测数值，往往意味着要把两个方法都重新实现一遍。
 
-**MemoryData 正是为填补这一空白而生。** 它是一个面向研究的基准测试套件，将四大基准族（MemoryAgentBench、LoCoMo、LongBench、MemBench）、二十三种方法预设以及共享的运行时统一到一个 `main.py` 启动器之下，使异构的记忆范式能够在一致的执行接口和稳定的产物布局下进行比较。
+**MemoryData 正是为填补这一空白而生。** 它是一个面向研究的基准测试套件，将五大基准族（MemoryAgentBench、LoCoMo、LongBench、MemBench、HaluMem）、二十五种方法预设以及共享的运行时统一到一个 `main.py` 启动器之下，使异构的记忆范式能够在一致的执行接口和稳定的产物布局下进行比较。
 
 
 **新增 Hindsight：** 使用 `config/hybrid_hindsight.yaml` 搭配现有数据集 YAML 即可选择该方法。原生 `retain` / `recall` 负责记忆写入与检索，MemoryData 回答模型生成最终答案；支持独立 bank、来源追踪、保存恢复和 `--force` 清理。需要另行启动 Hindsight 服务。完整命令和验证边界见 [接入指南](docs/hindsight.md)。
+
+**新增 REMem 与 TSM：** `config/topological_remem.yaml`、`config/topological_tsm.yaml` 在各自独立的 conda 环境中原样运行作者发布的代码（其固定依赖与 MemoryData 冲突），通过 JSON lines 子进程桥接（`methods/worker_bridge.py`）调用，密钥只经子进程环境变量传入。TSM 另需本机 Neo4j。两者都在写完全部历史后一次性建索引，因此不支持逐 session 交错提问的数据集。TSM 发布版 0.1.1 按发布状态无法运行：MemoryData 在运行时加了有记录的兼容处理和两处逻辑修补，相应结果标记为 `mdpatch1`。详见 [REMem 接入说明](docs/remem.md) 和 [TSM 接入说明](docs/tsm.md)。
+
+**新增 HaluMem：** 记忆系统问答幻觉评测，写完一个 session 就回答该 session 的问题；官方的正确/幻觉/遗漏判分是单独、显式运行的一步。详见 [HaluMem 接入说明](docs/halumem.md)。
 
 全部预设现从根 `.env` 读取统一的远程模型配置：`gpt-4o-mini` 和 `text-embedding-3-small`（1536 维），替代原本的本地模型端点。各方法检索数量和预算仍保留原值；MemoRAG 依赖本地核心模型，API 模式下会明确拒绝运行。配置、服务边界和验证方式见 [统一 API 配置指南](docs/api_models.md)。
 
@@ -76,7 +80,7 @@
 </td>
 <td width="50%">
 
-**🧩 23 种方法预设**
+**🧩 25 种方法预设**
 扁平化的 YAML 预设覆盖参考基线、序列上下文、结构拓扑、多范式混合四类架构，通过本地运行时或服务适配器接入。
 
 </td>
@@ -84,8 +88,8 @@
 <tr>
 <td>
 
-**📊 4 大基准族**
-MemoryAgentBench、LoCoMo、LongBench 和 MemBench，各自提供完整版配置以及按类别/切片的细分配置，开箱即用。
+**📊 5 大基准族**
+MemoryAgentBench、LoCoMo、LongBench、MemBench 和 HaluMem，各自提供完整版配置以及按类别/切片的细分配置，开箱即用。
 
 </td>
 <td>
@@ -128,6 +132,8 @@ conda activate memory-bench
 | Linux / macOS | `pip install -r requirements.txt` |
 | Windows | `pip install -r requirements-windows.txt` |
 
+REMem 和 TSM 运行在各自的独立环境中（依赖见 `methods/remem/requirements-remem.txt`、`methods/tsm/requirements-tsm.txt`），解释器路径由预设中的 `remem_python` / `tsm_python` 指定；TSM 还需要运行中的 Neo4j（5.x 或更新的日历版本，冒烟测试使用 2026.09）。Hindsight 需要另行部署的服务。具体步骤见 `docs/` 下各方法的接入说明。
+
 ### 第二步：配置模型端点与密钥
 
 在项目根 `.env` 填写远程 API 配置；没有文件时参考 [.env.example](.env.example)，已有文件时保留密钥。默认预设通过环境变量统一解析回答模型和嵌入模型，无需逐个修改 YAML 的本地端口。完整说明见 [统一 API 配置](docs/api_models.md)。
@@ -140,6 +146,7 @@ conda activate memory-bench
 | `OPENAI_EMBEDDING_MODEL` | 使用嵌入的预设 | 默认 `text-embedding-3-small` |
 | `OPENAI_EMBEDDING_DIMENSIONS` | 向量库 | 默认 1536，须匹配实际输出 |
 | `OPENAI_API_TRUST_ENV` | 模型 API 客户端 | 默认 `true`，支持使用已有系统代理 |
+| `NEO4J_PASSWORD` | TSM | Graphiti 使用的本机 Neo4j 密码，只从环境变量读取 |
 | `OPENAI_API_BASE` | MemOS 示例环境 | 使用 MemOS 专属配置时请参考 `methods/MemOS/config/.env.example` |
 
 ### 第三步：准备数据集
@@ -186,6 +193,8 @@ python main.py --agent_config <agent_yaml> --dataset_config <dataset_yaml>
 | LoCoMo 评测 | `config/hybrid_simplemem.yaml` | `benchmark/locomo/config/Locomo_qa_4cat_600_dist.yaml` | - |
 | LongBench 评测 | `config/reference_embedding_rag.yaml` | `benchmark/longbench/config/LongBench_rep150_proportional.yaml` | - |
 | MemBench 评测 | `config/sequential_mem0.yaml` | `benchmark/membench/config/MemBench_simple.yaml` | - |
+| HaluMem 评测 | `config/hybrid_hindsight.yaml` | `benchmark/halumem/config/HaluMem_medium.yaml` | 之后单独判分：`python -m evaluation.halumem.evaluate_halumem_judge <results.json>` |
+| REMem / TSM 冒烟 | `config/topological_remem.yaml` 或 `config/topological_tsm.yaml` | `benchmark/memoryagentbench/Accurate_Retrieval/config/LongMemEval/Longmemeval_s.yaml` | `--max_test_queries_ablation 2` |
 
 示例：
 
@@ -206,11 +215,15 @@ project-root/
 │   ├── memoryagentbench/          # MemoryAgentBench 加载器与基准配置
 │   ├── locomo/                    # LoCoMo 配置与 JSON 加载器
 │   ├── longbench/                 # LongBench 按比例采样子集支持
-│   └── membench/                  # MemBench 各切片配置与加载器
+│   ├── membench/                  # MemBench 各切片配置与加载器
+│   └── halumem/                   # HaluMem 加载器与逐 session 交错提问配置
 ├── evaluation/
-│   └── longmemeval/               # 保留的 LongMemEval 外挂评测辅助代码
+│   ├── longmemeval/               # 保留的 LongMemEval 外挂评测辅助代码
+│   └── halumem/                   # HaluMem 问答判分（单独一步）
 ├── methods/                        # 按论文分类组织的方法运行时
-│   ├── hindsight/                  # native REST retain/recall; separately deployed server
+│   ├── hindsight/                  # 原生 REST retain/recall，服务需另行部署
+│   ├── remem/  tsm/                # 适配器与 worker：在独立环境中运行作者代码
+│   ├── worker_bridge.py            # 与这些 worker 的 JSON lines 桥接（生命周期、经环境变量传密钥）
 │   ├── embedding_rag/              # 稠密检索参考基线
 │   ├── memagent/  mem0/  memochat/ # 序列上下文架构
 │   ├── cognee/  graph_rag/  hipporag/  memtree/  raptor/  zep/  zep_local/ # 结构拓扑架构
@@ -240,6 +253,8 @@ project-root/
 | 结构拓扑架构 | HippoRAG | `topological_hippo_rag_v2_openai.yaml` | `methods/hipporag/` | 基于图结构文档组织的检索 |
 | 结构拓扑架构 | RAPTOR | `topological_raptor.yaml` | `methods/raptor/raptor.py` | 分层聚类并摘要的检索基线 |
 | 结构拓扑架构 | Zep | `topological_zep.yaml` | `methods/zep/zep.py` | 云端图记忆集成 |
+| 结构拓扑架构 | REMem | `topological_remem.yaml` | `methods/remem/remem_adapter.py` | 情节要点/事实混合图加智能体（ReAct）检索；作者代码运行于独立环境 |
+| 结构拓扑架构 | TSM | `topological_tsm.yaml` | `methods/tsm/tsm_adapter.py` | 时序知识图（Graphiti + Neo4j）加按月语义快照；发布版 0.1.1，含有记录的 MemoryData 修补 |
 | 多范式混合架构 | Letta | `hybrid_letta.yaml` | `utils/agent.py` | 通过内嵌（vendored）的 Letta 源码与本地运行时管理集成 |
 | 多范式混合架构 | Hindsight | `hybrid_hindsight.yaml` | `methods/hindsight/hindsight_adapter.py` | 原生 retain/recall，远端 bank 隔离，复用 MemoryData 回答模型 |
 | 多范式混合架构 | LightMem | `hybrid_lightmem.yaml` | `methods/lightmem/lightmem_adapter.py` | 分层的记忆构建与检索 |
