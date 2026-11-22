@@ -99,8 +99,6 @@ class ConversationCreator:
         
         # Determine how many samples to process
         num_samples_to_process = min(len(dataset_items), self.max_test_samples)
-        if str(self.dataset).lower() == "omnimemeval" and not self.max_test_samples:
-            num_samples_to_process = len(dataset_items)
 
         # Process each dataset item using list comprehension for better performance
         processed_items = [
@@ -147,8 +145,7 @@ class ConversationCreator:
         if "context_chunks" in dataset_item:
             context_payload = dataset_item["context_chunks"]
             context_length = sum(len(str(chunk.get("text", ""))) for chunk in context_payload)
-            minimum = 0 if str(self.dataset).lower() == "omnimemeval" else 2000
-            assert context_length > minimum, f"Context too short: {context_length} characters"
+            assert context_length > 2000, f"Context too short: {context_length} characters"
         else:
             context_payload = dataset_item["context"]
             assert len(context_payload) > 2000, f"Context too short: {len(context_payload)} characters"
@@ -178,11 +175,6 @@ class ConversationCreator:
         # Extract questions and answers, ensuring they are lists
         questions = self._ensure_list(question_data.get('questions', []))
         answers = self._ensure_list(question_data.get('answers', []))
-        if str(self.dataset).lower() == "omnimemeval":
-            if not questions or len(questions) != len(answers):
-                raise ValueError("OmniMemEval requires paired questions and answers")
-            return [self._create_single_qa_pair(question_data, question, answer, i)
-                    for i, (question, answer) in enumerate(zip(questions, answers))]
         
         # Process question-answer pairs based on actual data structure
         if len(questions) > 1 and len(answers) > 1:

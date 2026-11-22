@@ -1,8 +1,0 @@
-model: Qwen3-8B
-base_url: http://127.0.0.1:9908/v1
-api_key_env: OPENAI_API_KEY
-temperature: 0
-num_runs: 1
-max_concurrency: 2
-max_tokens: 2048
-timeout: 120

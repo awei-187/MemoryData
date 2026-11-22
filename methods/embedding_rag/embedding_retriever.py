@@ -308,8 +308,7 @@ class RAGSystem:
                  azure_api_version: str = "2024-02-01",
                  qwen3_disable_thinking: bool = True,
                  prompt_token_budget: int = None,
-                 tokenizer=None,
-                 record_context_budget: bool = False):
+                 tokenizer=None):
         self.retriever = retriever
         provider = _normalize_provider(provider or ("azure_openai" if use_azure else "openai"))
         if use_azure and provider == "openai":
@@ -330,7 +329,6 @@ class RAGSystem:
         self.qwen3_disable_thinking = qwen3_disable_thinking
         self.prompt_token_budget = prompt_token_budget
         self.tokenizer = tokenizer
-        self.record_context_budget = record_context_budget
 
     def _encode_tokens(self, text: str):
         if not self.tokenizer:
@@ -456,7 +454,6 @@ class RAGSystem:
         return {
             "query": query,
             "context_used": formatted_context,
-            **({"context_budget": {"stage": "retrieved_context", "before_chars": sum(len(text) for text in retrieved_contexts), "after_chars": sum(len(text) for text in fitted_contexts), "truncated": fitted_contexts != retrieved_contexts}} if self.record_context_budget else {}),
             "answer": response.choices[0].message.content,
             "memory_construction_time": memory_construction_time,
             "query_time_len": query_time_len,

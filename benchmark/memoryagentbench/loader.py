@@ -244,10 +244,6 @@ def load_eval_data(dataset_config):
     Returns:
         Loaded and processed dataset
     """
-    if str(dataset_config.get("dataset", "")).lower() == "omnimemeval":
-        from benchmark.omnimemeval.loader import load_omnimemeval_eval_data
-        return load_omnimemeval_eval_data(dataset_config)
-
     # Extract configuration parameters
     config_params = (
         dataset_config['dataset'], dataset_config['sub_dataset'],

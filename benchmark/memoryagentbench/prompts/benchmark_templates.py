@@ -322,9 +322,6 @@ def get_template(sub_dataset, template_name, agent_name):
     Returns:
         Template string
     """
-    if str(sub_dataset).startswith("omni_"):
-        from benchmark.omnimemeval.templates import get_template as omni_template
-        return omni_template(sub_dataset, template_name)
     normalized_dataset = normalize_dataset_name(sub_dataset)
 
     if template_name == "fact_extraction":

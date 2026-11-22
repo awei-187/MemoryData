@@ -1,7 +1,7 @@
 <div align="center">
   <h1><img src="./Memory.png" alt="MemoryData logo" width="96" align="middle" />&nbsp;MemoryData</h1>
   <p><b>A Unified Memory Benchmark Suite for Memory-Augmented Agents</b></p>
-  <p><i>"One pipeline. Four original benchmark families plus five OmniMemEval benchmarks. Twenty-two method presets."</i></p>
+  <p><i>"One pipeline. Four benchmark families. Twenty-two method presets. One consistent execution interface."</i></p>
 </div>
 
 <div align="center">
@@ -9,7 +9,6 @@
   [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
   [![Methods](https://img.shields.io/badge/Methods-22%20Presets-7C3AED?style=flat-square)]()
   [![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20Families-F97316?style=flat-square)]()
-  [![OmniMemEval](https://img.shields.io/badge/OmniMemEval-5%20Benchmarks-F97316?style=flat-square)](docs/omnimemeval.md)
   [![Platform](https://img.shields.io/badge/Platform-Linux·macOS·Windows-00D4FF?style=flat-square)]()
   [![Taxonomy](https://img.shields.io/badge/Taxonomy-Reference·Sequential·Topological·Hybrid-16A34A?style=flat-square)]()
 
@@ -59,40 +58,6 @@ Memory-augmented agents, structured memory architectures, and retrieval-based ba
 
 **MemoryData closes that gap.** It is a research-oriented benchmark suite that unifies four benchmark families (MemoryAgentBench, LoCoMo, LongBench, MemBench), twenty-two method presets, and a shared runtime under a single `main.py` launcher, so that heterogeneous memory formulations can be compared under one consistent execution interface and one stable artifact layout.
 
-The `memorydata_omnimemeval_v1` extension adds **LoCoMo, LongMemEval, PersonaMem v2, HaluMem and BEAM** from OmniMemEval (`a5c8b4b`), using the same launcher and agent presets. It preserves each benchmark's scoring rules within MemoryData's execution pipeline; it does not claim to reproduce OmniMemEval's published scores.
-
-## OmniMemEval quick start
-
-See the [full usage guide](docs/omnimemeval.md), [中文使用指南](docs/omnimemeval_zh.md), [change summary](docs/omnimemeval_changes.md) and [validation record](docs/omnimemeval_validation.md). Existing benchmark configurations continue to work.
-
-| Benchmark | Smoke config under `benchmark/omnimemeval/config/` | Default full config | Primary score |
-| --- | --- | --- | --- |
-| LoCoMo (raw, categories 1–4) | `locomo_smoke.yaml` | `locomo_default.yaml` | Judge Accuracy by category |
-| LongMemEval S | `longmemeval_smoke.yaml` | `longmemeval_s.yaml` | Judge Accuracy by question type |
-| PersonaMem v2, benchmark/32K | `personamem_v2_smoke.yaml` | `personamem_v2_32k.yaml` | Option Accuracy by preference type |
-| HaluMem Medium | `halumem_smoke.yaml` | `halumem_medium.yaml` | QA Judge Accuracy by type/difficulty |
-| BEAM 100k | `beam_smoke.yaml` | `beam_100k.yaml` | Rubric nugget / event-ordering score |
-
-Prepare the adjacent `OmniMemEval/data` directory with `scripts/prepare_omnimemeval.ps1`, or set `data_root` in the dataset YAML. Install the scoped `requirements-omnimemeval.txt` in a Python 3.11 environment. The scripts currently default to this workspace's Windows paths; adapt those paths on another machine.
-
-From the MemoryData root in Windows PowerShell:
-
-```powershell
-& 'D:\conda\envs\memorydata\python.exe' main.py --agent_config config/reference_long_context_agent.yaml --dataset_config benchmark/omnimemeval/config/locomo_smoke.yaml --artifact_root results/omni_runs
-```
-
-Choose another dataset by changing `--dataset_config`; choose Embedding RAG or Mem0 with `config/reference_embedding_rag.yaml` or `config/sequential_mem0.yaml`. Smoke configs ingest the first valid unit's complete history and answer at most three questions (one for LongMemEval). Full configs remove those sample/question limits. Historical LoCoMo 600-question and MemoryAgentBench LongMemEval subsets remain separate from these raw benchmarks.
-
-Run benchmark-specific scoring separately, using the result path printed by `main.py`:
-
-```powershell
-& 'D:\conda\envs\memorydata\python.exe' -m evaluation.omnimemeval.evaluate 'PATH_TO_BENCHMARK_RESULTS.json' --judge_config evaluation/omnimemeval/config/qwen3_8b.yaml
-```
-
-Scores are saved to a separate `.omnimemeval_scores.json` sidecar. Rerunning the same commands resumes compatible answers and scores; data/configuration fingerprints isolate state. PersonaMem scoring needs no judge model. Answer and embedding endpoints in the agent YAML, and the judge endpoint above, must refer to running OpenAI-compatible services; these scripts do not download weights or deploy models.
-
-**Validation status:** 23 offline tests passed, including 15 simulated-HTTP combinations across Long Context, Embedding RAG and Mem0. All five default datasets were parsed (750 units / 10,907 questions). Real-model acceptance remains blocked because ports 9908, 9909 and 9009 had no serving endpoints. Simulated scores are not model-quality results; the other 19 method presets have template compatibility checks only.
-
 
 ## 📚 Features
 
@@ -115,8 +80,8 @@ Flattened YAML presets span reference baselines, sequential context, structural 
 <tr>
 <td>
 
-**📊 Original Benchmarks + OmniMemEval**
-MemoryAgentBench, LoCoMo, LongBench and MemBench, plus five OmniMemEval benchmarks with independent scoring and bounded-memory dataset iteration.
+**📊 4 Benchmark Families**
+MemoryAgentBench, LoCoMo, LongBench, and MemBench, each with full and category-specific or slice-specific configs ready to run.
 
 </td>
 <td>
@@ -231,14 +196,9 @@ project-root/
 │   ├── memoryagentbench/          # MemoryAgentBench loaders and benchmark configs
 │   ├── locomo/                    # LoCoMo configs and JSON loader
 │   ├── longbench/                 # LongBench proportional-subset support
-│   ├── membench/                  # MemBench slice configs and loader
-│   └── omnimemeval/               # five loaders, templates, streaming runtime and 17 configs
+│   └── membench/                  # MemBench slice configs and loader
 ├── evaluation/
-│   ├── longmemeval/               # retained LongMemEval sidecar evaluation helpers
-│   └── omnimemeval/               # dedicated judge/rubric scoring and upstream attribution
-├── docs/                          # integration guides, change summary and validation record
-├── scripts/                       # OmniMemEval setup, data preparation and validation
-├── tests/                         # offline loader/scoring/interface/integration tests
+│   └── longmemeval/               # retained LongMemEval sidecar evaluation helpers
 ├── methods/                        # method runtimes grouped by the paper taxonomy
 │   ├── embedding_rag/              # reference dense-retrieval baseline
 │   ├── memagent/  mem0/  memochat/ # sequential context architectures
@@ -246,7 +206,6 @@ project-root/
 │   └── a_mem/  everos/  letta/  lightmem/  memorag/  memoryos/  self_rag/  simplemem/  MemOS/ # multi-paradigm hybrid architectures
 ├── utils/                          # shared runtime utilities, including long-context and BM25 reference paths
 ├── requirements.txt               # dependency manifest for Linux/macOS
-├── requirements-omnimemeval.txt   # scoped integration + three-method validation dependencies
 └── requirements-windows.txt       # dependency manifest for Windows
 ```
 

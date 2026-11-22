@@ -500,27 +500,7 @@ class AgentWrapper:
         }
         if self.record_llm_io and self._last_llm_trace is not None:
             response["llm_trace"] = self._last_llm_trace
-        if self.sub_dataset.startswith("omni_"):
-            response["answer_context_budget"] = list(getattr(self, "_omni_budget", []))
-            response["answer_context_truncated"] = any(item["truncated"] for item in response["answer_context_budget"])
         return response
-
-    def _benchmark_time_suffix(self):
-        if self.sub_dataset.startswith("omni_"):
-            value = (self._current_eval_metadata or {}).get("question_time")
-            return f"\n\nQuestion Time: {value}" if value else ""
-        return "\n\nCurrent Time: " + time.strftime("%Y-%m-%d %H:%M:%S")
-
-    def _memory_timestamp(self, pattern):
-        if self.sub_dataset.startswith("omni_"):
-            return getattr(self, "_current_memory_timestamp", None)
-        return time.strftime(pattern)
-
-    def _record_omni_budget(self, before, after, stage):
-        if self.sub_dataset.startswith("omni_"):
-            if not hasattr(self, "_omni_budget"):
-                self._omni_budget = []
-            self._omni_budget.append({"stage": stage, "before_chars": len(before), "after_chars": len(after), "truncated": before != after})
 
     def _supports_locomo_recall(self):
         """Return whether the current agent should persist LoCoMo source metadata."""
@@ -543,9 +523,6 @@ class AgentWrapper:
         """Convert structured dataset chunks into the text each agent should see."""
         if not isinstance(message, dict):
             return message
-
-        if memorizing and self.sub_dataset.startswith("omni_"):
-            self._current_memory_timestamp = message.get("timestamp")
 
         plain_text = str(message.get("text", "") or "")
         storage_text = str(message.get("storage_text", "") or plain_text)
@@ -645,9 +622,7 @@ class AgentWrapper:
             truncated_text = self.tokenizer.decode(truncated_tokens)
         else:
             truncated_text = "".join(truncated_tokens)
-        truncated_text = truncated_text.strip()
-        self._record_omni_budget(text, truncated_text, "token_limit")
-        return truncated_text
+        return truncated_text.strip()
 
     def _fit_text_to_prompt_token_limit(
         self,
@@ -775,7 +750,8 @@ class AgentWrapper:
                         memories=memories_text or "(No retrieved memories found.)",
                         question=question,
                     )
-                    + self._benchmark_time_suffix()
+                    + "\n\nCurrent Time: "
+                    + time.strftime("%Y-%m-%d %H:%M:%S")
                 ),
             },
         ]
@@ -801,7 +777,8 @@ class AgentWrapper:
                         memories=truncated_memories or "(No retrieved memories found.)",
                         question=question,
                     )
-                    + self._benchmark_time_suffix()
+                    + "\n\nCurrent Time: "
+                    + time.strftime("%Y-%m-%d %H:%M:%S")
                 )
                 try:
                     response_text, prompt_tokens, completion_tokens = self._request_openai_completion(llm_messages)
@@ -831,7 +808,8 @@ class AgentWrapper:
         system_message = get_template(self.sub_dataset, 'system', self.agent_name)
         prompt_without_memories = (
             memory_answer_template.format(memories="", question=question)
-            + self._benchmark_time_suffix()
+            + "\n\nCurrent Time: "
+            + time.strftime("%Y-%m-%d %H:%M:%S")
         )
         return self._fit_retrieved_contexts_to_token_limit(
             contexts=contexts,
@@ -2420,7 +2398,6 @@ class AgentWrapper:
             self._current_context_id = context_id
             self._current_eval_metadata = eval_metadata
             self._last_llm_trace = None
-            self._omni_budget = []
 
         message = self._normalize_message_payload(message, memorizing=memorizing)
 
@@ -2598,8 +2575,6 @@ class AgentWrapper:
             used_tokens += prefix_tokens + len(text_tokens)
 
         if fitted_contexts:
-            if self.sub_dataset.startswith("omni_"):
-                self._record_omni_budget("\n".join(contexts), "\n".join(fitted_contexts), "retrieved_context")
             return fitted_contexts
 
         fallback_prefix_tokens = len(_encode(f"{label_prefix} 1:\n"))
@@ -3125,8 +3100,6 @@ class AgentWrapper:
 
             cleaned_memory_texts = self._clean_retrieved_memory_contexts(raw_memory_texts)
             memories_for_prompt = cleaned_memory_texts or [strip_locomo_metadata(text) for text in raw_memory_texts]
-            if self.sub_dataset.startswith("omni_"):
-                memories_for_prompt = self._fit_memories_for_answer(message, memories_for_prompt, prompt_override=self.agent_config.get("mem0_memory_answer_prompt"))
             memories_str = "\n".join(f"- {text}" for text in memories_for_prompt) or "(No retrieved memories found.)"
             memory_answer_template = (
                 self.agent_config.get("mem0_memory_answer_prompt")
@@ -3139,7 +3112,7 @@ class AgentWrapper:
 
             llm_messages = [
                 {"role": "system", "content": get_template(self.sub_dataset, 'system', self.agent_name)},
-                {"role": "user", "content": formatted_query + self._benchmark_time_suffix()},
+                {"role": "user", "content": formatted_query + "\n\nCurrent Time: " + time.strftime("%Y-%m-%d %H:%M:%S")},
             ]
             request_kwargs = self._prepare_openai_request_kwargs(
                 {
@@ -3183,7 +3156,7 @@ class AgentWrapper:
                 context=message,
                 **({'time_stamp': time.strftime("%Y-%m-%d %H:%M:%S")} if '{time_stamp}' in memorize_template else {})
             )
-            self.simplemem.add_chunk(formatted_message, timestamp=self._memory_timestamp("%Y-%m-%dT%H:%M:%S"))
+            self.simplemem.add_chunk(formatted_message, timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"))
             return "Memorized"
 
         memory_construction_time = time.time() - self.agent_start_time
@@ -3234,7 +3207,7 @@ class AgentWrapper:
             stored_message = message if parse_locomo_source_ids(message) else clean_message
             self.lightmem.add_chunk(
                 stored_message,
-                timestamp=self._memory_timestamp("%Y/%m/%d (%a) %H:%M:%S"),
+                timestamp=time.strftime("%Y/%m/%d (%a) %H:%M:%S"),
             )
             return "Memorized"
 
@@ -3286,7 +3259,7 @@ class AgentWrapper:
             )
             self.a_mem.add_chunk(
                 formatted_message,
-                timestamp=self._memory_timestamp("%Y%m%d%H%M"),
+                timestamp=time.strftime("%Y%m%d%H%M"),
             )
             return "Memorized"
 
@@ -3795,7 +3768,7 @@ class AgentWrapper:
             self.context_len = self.context_len + self.chunk_size
 
             # Truncate context if it exceeds limits
-            if not self.sub_dataset.startswith("omni_") and self.context_len > self.input_length_limit:
+            if self.context_len > self.input_length_limit:
                 self.chunks = self.chunks[1:]
                 self.context_len = self.context_len - self.chunk_size
             return ''
@@ -3808,10 +3781,10 @@ class AgentWrapper:
 
         # Truncate context if needed
         tokenizer = self.tokenizer
-        if not self.sub_dataset.startswith("omni_") and len(tokenizer.encode(self.context, disallowed_special=())) > self.input_length_limit:
+        if len(tokenizer.encode(self.context, disallowed_special=())) > self.input_length_limit:
             encoded = tokenizer.encode(self.context, disallowed_special=())
             self.context = tokenizer.decode(encoded[-self.input_length_limit:])
-        if not self.sub_dataset.startswith("omni_") and self.context_len > self.input_length_limit:
+        if self.context_len > self.input_length_limit:
             self.chunks = self.chunks[1:]
             self.context_len = self.context_len - self.chunk_size
 
@@ -4138,7 +4111,6 @@ class AgentWrapper:
             qwen3_disable_thinking=bool(self.agent_config.get("qwen3_disable_thinking", True)),
             prompt_token_budget=self.input_length_limit,
             tokenizer=tokenizer,
-            record_context_budget=self.sub_dataset.startswith("omni_"),
         )
         system_message = get_template(self.sub_dataset, 'system', self.agent_name)
         result = rag_system.answer_query(
@@ -4157,7 +4129,6 @@ class AgentWrapper:
             "memory_construction_time": result.get("memory_construction_time", result.get("memory_construction_time", 0)),
             "query_time_len": result["query_time_len"],
             "retrieval_context": retrieval_context,
-            **({"answer_context_budget": [result["context_budget"]], "answer_context_truncated": result["context_budget"]["truncated"]} if self.sub_dataset.startswith("omni_") else {}),
         }
 
     def _handle_raptor_rag(self, message, context_id, tokenizer):

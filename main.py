@@ -822,21 +822,6 @@ def main():
     """Main function to run the memory agent benchmark evaluation."""
     # Parse command line arguments and setup configurations
     args = parse_command_line_arguments()
-    # Keep OmniMemEval lazy: do not construct ConversationCreator's full corpus.
-    with open(args.dataset_config, encoding="utf-8") as stream:
-        requested_dataset = yaml.safe_load(stream)
-    if str(requested_dataset.get("dataset", "")).lower() == "omnimemeval":
-        if args.backfill_longmemeval_recall_debug:
-            raise ValueError("--backfill_longmemeval_recall_debug is only supported by the original LongMemEval pipeline")
-        from benchmark.omnimemeval.runtime import run
-        with open(args.agent_config, encoding="utf-8") as stream:
-            requested_agent = yaml.safe_load(stream)
-        if args.chunk_size_ablation:
-            requested_dataset["chunk_size"] = args.chunk_size_ablation
-            if "agent_chunk_size" in requested_agent:
-                requested_agent["agent_chunk_size"] = args.chunk_size_ablation
-        run(args, requested_agent, requested_dataset)
-        return
     agent_config, dataset_config, output_path = setup_configs_and_directories(args)
     
     # Create agent and fetch evaluation data
